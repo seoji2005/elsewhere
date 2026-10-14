@@ -75,8 +75,16 @@ function proportion(vrm: VRM, sd: number) {
 let motions: ReturnType<typeof loadAssets> | undefined;
 export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outfits[0], phase = 0) {
   const [vrm, motion] = await Promise.all([cloneModel(outfit), motions ??= loadAssets('people')]);
+  // Precise bounds include skinned vertices; update skeleton matrices after each rest-pose scale change.
+  const height = () => {
+    vrm.scene.updateMatrixWorld(true);
+    vrm.scene.traverse(object => { if (object instanceof T.SkinnedMesh) object.skeleton.update(); });
+    return new T.Box3().setFromObject(vrm.scene, true).getSize(new T.Vector3()).y;
+  };
+  const originalHeight = sd ? height() : 1;
   // Scale the raw rig, including clothing/spring roots; normalized animation only transfers rotations and hips position.
   const bodyScale = proportion(vrm, sd);
+  const focusHeight = 1.4 * (sd ? height() / originalHeight : 1);
   const rig = motion.scene.getObjectByName('UAL1_Standard')!;
   motion.scene.updateMatrixWorld(true);
   let pelvis = rig;
@@ -90,7 +98,7 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   const group = new T.Group().add(vrm.scene), face = vrm.expressionManager;
   group.name = outfit.name;
   let time = phase, blinkAt = phase + 1.5 + phase * 0.3, smileAt = 3, first = true;
-  return { group, update(speed: number, dt: number) {
+  return { group, focusHeight, update(speed: number, dt: number) {
     const moving = Math.min(speed / 0.6, 1), running = T.MathUtils.clamp((speed - WALK) / (RUN - WALK), 0, 1);
     idle.weight = 1 - moving;
     walk.weight = moving * (1 - running);
