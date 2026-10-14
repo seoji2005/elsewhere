@@ -16,8 +16,8 @@ import { createMatchmakingState, resolveMatch } from '../sim/matchmaking';
 import { axes, createBonds, seedLegacy } from '../sim/bonds';
 import { createDialogueState } from '../sim/dialogue';
 import { createRippleState } from '../sim/ripple';
-import { createPurse, funds, personAccount } from '../sim/purse';
-import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, type BusinessBook } from '../sim/business';
+import { createPurse, funds, personAccount, payPerson, dayCashflow } from '../sim/purse';
+import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, procure, producerJobs, type BusinessBook } from '../sim/business';
 import { jobs } from '../data/jobs';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60;
@@ -38,14 +38,46 @@ function createEconomy(world: ReturnType<typeof createWorld>) {
   hire(book, people, ledger, 'tea-counter', 'iri', jobs[0], now);
   return { purses, book, economyMinute: Math.floor(world.clock.totalMinutes), settledDay: now.day - 1 };
 }
-function freshState() {
+// Stable daily decisions do not depend on tick size or iteration order.
+function choice(seed: number, key: string): number {
+  let hash = seed;
+  for (const c of key) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
+  return hash;
+}
+function addResidents(state: ReturnType<typeof freshState>, allocate = false, open = false) {
+  const { world, purses, book } = state, now = gameTime(world.clock);
+  const generated = generate(state.npcSeed, 50), residents = [...npcs, ...generated];
+  for (const [index, n] of generated.entries()) {
+    world.people[n.id] = { id: n.id, name: n.name, role: 'npc', placeId: whereIs(n, now) };
+    world.ledger.balances[n.id] ??= 0;
+    purses[n.id] ??= createPurse(world.people, world.ledger, n.id);
+    if (allocate) payPerson(world.people, world.ledger, { id: `initial:${n.id}`, from: npcs[index % npcs.length].id,
+      to: n.id, amount: 20 + choice(state.npcSeed, n.id) % 20, time: now, reason: 'Initial allocation' });
+  }
+  if (open) {
+    state.populationEconomy = true; book.businesses = []; book.employment = [];
+    for (const [id, ownerId, placeId, itemId, price, capacity] of [
+      ['tea-counter', 'nuel', 'cafe', 'tea', 8, 1],
+      ['exchange-counter', 'sori', 'shop', 'scarf', 25, 2],
+      ['garden-counter', 'iri', 'park', 'soup', 15, 1],
+    ] as const) {
+      openBusiness(book, world.people, world.ledger, id, ownerId, placeId, capacity,
+        [{ itemId, backroom: 0, displayed: 0, capacity: 5, price }], now);
+      for (const n of residents.filter(n => n.job === producerJobs[itemId] && n.id !== ownerId).slice(0, capacity))
+        hire(book, world.people, world.ledger, id, n.id, { id: `${id}-helper`, name: n.job,
+          employerId: ownerId, placeId, fromMinute: 0, toMinute: 1440, durationMinutes: 60, hourlyWage: 4 }, now);
+    }
+  }
+  return residents;
+}
+function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
   const world = createWorld();
   world.places = Object.fromEntries(places.map(p => [p.id, { ...p }]));
   world.companies = Object.fromEntries(companies.map(c => [c.id, { id: c.id, name: c.name }]));
   world.people = Object.fromEntries(npcs.map(n => [n.id,
     { id: n.id, name: n.name, role: 'npc' as const, placeId: whereIs(n, gameTime(world.clock)) }]));
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
-  return { npcSeed: Math.floor(Math.random() * 0x100000000), world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
+  return { npcSeed, populationEconomy: false, world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
@@ -107,8 +139,9 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
         || n.mode === 'rumor' && [1, 2].includes(n.hops) && n.sourceId !== n.observerId && n.learned >= n.created + 60 * n.hops));
   }
 }
-export function createSession(storage: Storage) {
-  let state = freshState(), lastSaved = 0, damaged: string | null = null;
+export function createSession(storage: Storage, npcSeed?: number) {
+  let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null;
+  addResidents(state, true, true);
   let loadResult: SaveResult = { ok: true };
   const backup = () => {
     if (damaged === null) return;
@@ -125,12 +158,17 @@ export function createSession(storage: Storage) {
           state.world = restoreWorld(raw);
           state.player.placeId = state.world.people.player?.placeId ?? state.player.placeId;
           state.market.day = gameTime(state.world.clock).day;
-        } else if ([2, 3, 4].includes(parsed?.version)) state = parsed.state;
+        } else if ([2, 3, 4, 5].includes(parsed?.version)) state = parsed.state;
         else throw Error('Unsupported session version');
         state.npcSeed = parsed.version === 1 ? 0 : state.npcSeed ?? 0;
         if (parsed.version < 3) Object.assign(state, { dialogue: createDialogueState(), bonds: createBonds(),
           ripple: createRippleState(), relationMode: 'legacy' });
         if (parsed.version < 4) Object.assign(state, createEconomy(state.world));
+        if (parsed.version < 5) state.populationEconomy = false;
+        // Generated identities are omitted from saves; wallets and contracts are retained.
+        if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
+          !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
+        addResidents(state);
         checkShape(state, { ...freshState(), world: createWorld() });
         if (parsed.version < 3) state.bonds = seedLegacy(state.world, state.encounters);
         checkSocial(state);
@@ -180,10 +218,10 @@ export function createSession(storage: Storage) {
         generate(state.npcSeed, 0); // Validate the saved uint32 seed before accepting the save.
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
-      } catch (error) { state = freshState(); damaged = raw; loadResult = { ok: false, error }; backup(); }
+      } catch (error) { state = freshState(npcSeed); addResidents(state, true, true); damaged = raw; loadResult = { ok: false, error }; backup(); }
     }
   } catch (error) { loadResult = { ok: false, error }; }
-  const residents = [...npcs, ...generate(state.npcSeed, 50)];
+  const residents = addResidents(state);
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: whereIs(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
@@ -192,7 +230,7 @@ export function createSession(storage: Storage) {
       backup(); // Never overwrite a damaged save until its backup succeeds.
       if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
       const people = Object.fromEntries(Object.entries(state.world.people).filter(([id]) => !id.startsWith('generated-')));
-      storage.setItem(SESSION_KEY, JSON.stringify({ version: 4, state: { ...state, world: { ...state.world, people } } }));
+      storage.setItem(SESSION_KEY, JSON.stringify({ version: 5, state: { ...state, world: { ...state.world, people } } }));
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };
     } catch (error) { return { ok: false, error }; }
@@ -215,27 +253,46 @@ export function createSession(storage: Storage) {
       };
       payWages();
       if (minute % 60 === 0) {
-        for (const b of book.businesses) for (const npc of npcs) if (
-          b.closedAt === null && b.openedAt <= minute && whereIs(npc, now) === b.placeId) {
-          const employment = book.employment.find(e => e.businessId === b.id && e.actorId === npc.id && e.leftAt === null);
-          if (employment && now.hour * 60 >= employment.job.fromMinute &&
-              now.hour * 60 + employment.job.durationMinutes <= employment.job.toMinute && !state.work.shifts.some(s => s.actorId === npc.id &&
-              (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
-            startEmployeeShift(book, state.work, npc.id, b.placeId, now);
-          if (npc.id === b.ownerId) continue;
-          restock(b.store, 'tea', 5);
-          const visit = visitStore(b.store, world.ledger, `tea:${now.day}:${npc.id}`, npc.id,
-            { itemId: 'tea', maxPrice: 8 }, 1, now);
-          const sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
-          if (sale.ok && !sale.duplicate) {
-            const life = state.shop.residents[npc.id] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
-            life.inventory.tea = (life.inventory.tea ?? 0) + 1; useItem(state.shop, npc.id, 'tea');
+        const byPlace = new Map<string, typeof residents>();
+        for (const npc of residents) {
+          const place = whereIs(npc, now), present = byPlace.get(place) ?? [];
+          present.push(npc); byPlace.set(place, present);
+        }
+        for (const b of book.businesses) if (b.closedAt === null && b.openedAt <= minute) {
+          expireVisits(b.store, now);
+          for (const npc of byPlace.get(b.placeId) ?? []) {
+            const employment = book.employment.find(e => e.businessId === b.id && e.actorId === npc.id && e.leftAt === null);
+            const slots = npc.schedule[(now.day - 1) % 7];
+            const next = slots.find(slot => slot.fromMinute > minute % 1440)?.fromMinute ?? 1440;
+            if (employment && minute % 1440 >= employment.job.fromMinute &&
+                minute % 1440 + employment.job.durationMinutes <= Math.min(next, employment.job.toMinute) &&
+                !state.work.shifts.some(s => s.actorId === npc.id && (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
+              startEmployeeShift(book, state.work, npc.id, b.placeId, now);
+            if (npc.id === b.ownerId) continue;
+            const stock = b.store.stock[0], visitId = `${b.id}:${now.day}:${npc.id}`;
+            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= 60 ||
+                b.store.visits.some(v => v.id === visitId) ||
+                funds(world.ledger, purses[npc.id]).spendable < stock.price ||
+                dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
+            if (stock.backroom + stock.displayed === 0) {
+              const producer = residents.find(n => n.id !== b.ownerId && n.job === producerJobs[stock.itemId]);
+              if (producer) procure(book, world.people, world.ledger, b.id, producer, stock.itemId, 5,
+                Math.max(1, Math.floor(stock.price / 4)), `supply:${visitId}`, now);
+            }
+            restock(b.store, stock.itemId, 5);
+            const visit = visitStore(b.store, world.ledger, visitId, npc.id,
+              { itemId: stock.itemId, maxPrice: stock.price }, 1, now);
+            const sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
+            if (sale.ok && !sale.duplicate) {
+              const life = state.shop.residents[npc.id] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+              life.inventory[stock.itemId] = (life.inventory[stock.itemId] ?? 0) + 1; useItem(state.shop, npc.id, stock.itemId);
+            }
           }
         }
         payWages();
       }
       if (minute % 1440 === 0) {
-        for (const b of book.businesses) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
+        for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         advanceDay(state.market); state.settledDay = now.day - 1;
       }
       expireVisits(state.store, now);

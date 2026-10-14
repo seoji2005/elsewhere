@@ -1,6 +1,7 @@
 // Independent TS design inspired by Neighborly Business/Occupation and LeaveJob/BusinessClosedEvent.
 // Neighborly @ 1303cee0, MIT; no upstream code copied. Cash rules are new (see report).
 import type { Job } from '../data/jobs';
+import type { Npc } from '../data/npcs';
 import type { Stock } from '../data/stock';
 import type { GameTime } from './clock';
 import type { LedgerState, TransferResult } from './ledger';
@@ -104,6 +105,23 @@ export function checkoutBusiness(book: BusinessBook, people: People, ledger: Led
   if (b.closedAt !== null || now < b.openedAt) return { ok: false, error: 'Business closed' };
   if (funds(ledger, purse).spendable < visit.price) return { ok: false, error: 'Savings reserved' };
   return checkout(b.store, ledger, visitId, time);
+}
+export const producerJobs: Readonly<Record<string, string>> = {
+  tea: '잔향 차 배합사', scarf: '공유물 순환지기', soup: '떠오름 뜰 돌봄사',
+};
+// Goods are produced on a paid order; retries never manufacture a second batch.
+export function procure(book: BusinessBook, people: People, ledger: LedgerState, businessId: string,
+  producer: Pick<Npc, 'id' | 'job'>, itemId: string, quantity: number, unitCost: number,
+  orderId: string, time: GameTime): TransferResult {
+  const b = business(book, businessId), stock = b.store.stock.find(s => s.itemId === itemId);
+  if (!stock || b.closedAt !== null || minute(time) < b.openedAt || producer.job !== producerJobs[itemId] ||
+      !natural(quantity) || quantity === 0 || !natural(unitCost) || unitCost === 0 ||
+      !natural(quantity * unitCost) || !natural(stock.backroom + stock.displayed + quantity))
+    return { ok: false, error: 'Invalid procurement' };
+  const result = payPerson(people, ledger, { id: orderId, from: b.ownerId, to: producer.id,
+    amount: quantity * unitCost, time, reason: `Procurement: ${b.id}:${itemId}:${quantity}:${unitCost}` });
+  if (result.ok && !result.duplicate) stock.backroom += quantity;
+  return result;
 }
 // No first-day growth fiction. Signed fraction for recordNpcRevenue, never a cash deposit.
 export function revenueChange(b: Business, day: number): number {
