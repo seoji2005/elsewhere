@@ -13,7 +13,9 @@
       "Prop_Planter_Single.gltf",
       "Prop_ACUnit.gltf",
       "Door_1.gltf",
-      "Entrance_Concrete_2x1.gltf"
+      "Entrance_Concrete_2x1.gltf",
+      "Prop_ManholeCover.gltf",
+      "Prop_Drain.gltf"
     ]
   },
   "nature": {
@@ -43,6 +45,14 @@
       "Idle_Loop",
       "Walk_Loop",
       "Jog_Fwd_Loop"
+    ]
+  },
+  "street": {
+    "directory": "/home/dev/asset-packs",
+    "files": [
+      "k-city-kit-roads/Models/GLB format/light-curved.glb",
+      "k-furniture-kit/Models/GLTF format/bench.glb",
+      "k-furniture-kit/Models/GLTF format/pottedPlant.glb"
     ]
   }
 }
