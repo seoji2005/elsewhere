@@ -11,6 +11,8 @@ import { generate } from '../../src/sim/npcgen';
 import { applyBondEvent, edgeKey, readBond } from '../../src/sim/bonds';
 import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
 import { buildDialogue } from '../../src/sim/dialogue';
+import { hire, openBusiness, startEmployeeShift } from '../../src/sim/business';
+import { jobs } from '../../src/data/jobs';
 function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
@@ -174,5 +176,48 @@ it.each(['purse', 'cursor', 'business', 'employment', 'owner', 'wage', 'stock', 
   if (kind === 'sale') saved.state.book.businesses[0].store.events = [null];
   if (kind === 'stock') saved.state.book.businesses[0].store.stock[0].backroom = -1;
   const raw = JSON.stringify(saved); storage.setItem(SESSION_KEY, raw);
+  expect(createSession(storage).loadResult.ok).toBe(false); expect(storage.getItem(`${SESSION_KEY}.backup`)).toBe(raw);
+});
+it('balances 30 days of tea demand and pays a care worker without employing tuners', () => {
+  const session = createSession(memory()), { state } = session;
+  expect(state.book.employment.map(e => e.actorId)).toEqual(['iri']);
+  expect(npcs.find(n => n.id === 'iri')!.job).toContain('돌봄');
+  for (let day = 0; day < 30; day++) {
+    session.tick(1440); expect(state.world.ledger.balances.nuel).toBeGreaterThanOrEqual(1000);
+    expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+  }
+  const revenue = state.book.businesses[0].store.events.reduce((sum, e) => sum + e.amount, 0);
+  const wages = state.world.ledger.transactions.filter(t => t.reason.startsWith('Wage: ')).reduce((sum, t) => sum + t.amount, 0);
+  expect({ revenue, wages, owner: state.world.ledger.balances.nuel, employee: state.world.ledger.balances.iri })
+    .toEqual({ revenue: 336, wages: 120, owner: 1216, employee: 1088 });
+  expect(wages).toBeLessThanOrEqual(revenue); expect(state.work.shifts.every(s => s.paid)).toBe(true);
+});
+it('restores two businesses with different contracts and pays their respective owners', () => {
+  const storage = memory(), session = createSession(storage), { world, book } = session.state;
+  openBusiness(book, world.people, world.ledger, 'shared-counter', 'sori', 'shop', 3, [], gameTime(world.clock));
+  hire(book, world.people, world.ledger, 'shared-counter', 'velo', { ...jobs[1], durationMinutes: 60 }, gameTime(world.clock));
+  session.tick(480); startEmployeeShift(book, session.state.work, 'velo', 'shop', gameTime(world.clock));
+  session.saveNow(); const next = createSession(storage);
+  expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(session.state);
+  next.tick(60); expect(next.state.world.ledger.balances.sori).toBe(960); expect(next.state.world.ledger.balances.velo).toBe(1040);
+  next.tick(3 * 1440); next.saveNow(); expect(createSession(storage).state).toEqual(next.state);
+});
+it('preserves the original v4 two-worker tea contracts and unfinished wages', () => {
+  const storage = memory(), session = createSession(storage), { world, book } = session.state;
+  book.businesses[0].capacity = 2; book.employment = [];
+  for (const id of ['velo', 'lise']) hire(book, world.people, world.ledger, 'tea-counter', id, jobs[0], gameTime(world.clock));
+  session.tick(900); session.saveNow(); const next = createSession(storage);
+  expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(session.state);
+  next.tick(60); expect(next.state.world.ledger.balances.velo).toBe(1022);
+  expect(next.state.work.shifts.every(s => s.paid)).toBe(true);
+});
+it.each(['future opening', 'unknown business', 'wrong employer', 'capacity', 'duplicate worker'])('rejects invalid generalized contracts: %s', kind => {
+  const storage = memory(), session = createSession(storage), { book } = session.state;
+  if (kind === 'future opening') book.businesses[0].openedAt = 1;
+  if (kind === 'unknown business') book.employment[0].businessId = 'missing';
+  if (kind === 'wrong employer') book.employment[0].job.employerId = 'aro';
+  if (kind === 'capacity') book.businesses[0].capacity = 0;
+  if (kind === 'duplicate worker') { book.businesses[0].capacity = 2; book.employment.push(structuredClone(book.employment[0])); }
+  session.saveNow(); const raw = storage.getItem(SESSION_KEY);
   expect(createSession(storage).loadResult.ok).toBe(false); expect(storage.getItem(`${SESSION_KEY}.backup`)).toBe(raw);
 });

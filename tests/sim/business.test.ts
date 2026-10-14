@@ -8,7 +8,7 @@ it('keeps completed wages in arrears, then pays once from customer revenue after
   const { world: { people, ledger }, book, work, purses } = state, b = book.businesses[0];
   const time = { day: 1, hour: 0, minute: 0 }, end = { ...time, hour: 1 };
   payPerson(people, ledger, { id: 'empty-owner', from: b.ownerId, to: 'aro', amount: 1000, time, reason: 'Transfer' });
-  const shift = startEmployeeShift(book, work, 'velo', 'cafe', time);
+  const shift = startEmployeeShift(book, work, 'iri', 'cafe', time);
   expect(payCompletedShift(book, people, ledger, b.id, shift, time).ok).toBe(false);
   expect(payCompletedShift(book, people, ledger, b.id, shift, end).ok).toBe(false); expect(shift.paid).toBe(false);
   setPrice(b.store, 'tea', 30); restock(b.store, 'tea', 1);
@@ -18,6 +18,6 @@ it('keeps completed wages in arrears, then pays once from customer revenue after
   expect(checkoutBusiness(book, people, ledger, b.id, purses.player, 'customer', end)).toEqual({ ok: true, duplicate: true });
   expect(payCompletedShift(JSON.parse(JSON.stringify(book)), people, ledger, b.id, JSON.parse(JSON.stringify(shift)), end))
     .toEqual({ ok: true, duplicate: true });
-  expect(ledger.balances).toMatchObject({ player: 70, nuel: 0, velo: 1030 });
+  expect(ledger.balances).toMatchObject({ player: 70, nuel: 0, iri: 1030 });
   expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
 });
