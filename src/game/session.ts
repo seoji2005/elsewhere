@@ -1,6 +1,8 @@
 import { npcs } from '../data/npcs';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
+import { items } from '../data/items';
+import { chooseNeed, type Customer } from '../sim/customer';
 import { advanceClock, gameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
 import { restoreWorld } from '../sim/save';
@@ -13,7 +15,7 @@ import { createShopState, useItem, giveGift } from '../sim/shop';
 import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
 import { createMatchmakingState, resolveMatch, requestMatch, type MatchRequest } from '../sim/matchmaking';
-import { axes, createBonds, seedLegacy, edgeKey, emptyBond } from '../sim/bonds';
+import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly } from '../sim/bonds';
 import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
 import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '../sim/ripple';
 import { createPurse, funds, personAccount, payPerson, dayCashflow } from '../sim/purse';
@@ -267,27 +269,42 @@ export function createSession(storage: Storage, npcSeed?: number) {
   const social = {
     buildDialogue(npcId: string) {
       const result = buildDialogue(state.dialogue, context(npcId));
+      if (state.relationMode === 'bonds') result.stage = stageOf(state.bonds, npcId, 'player', state.dialogue);
       const names = Object.fromEntries(Object.values(state.world.people).map(p => [p.id, p.name]));
       const notice = noticeLine(npcId, state.ripple, gameTime(state.world.clock), names);
       return { ...result, line: notice ? `${notice} ${result.line}` : result.line };
     },
     talk(id: string, npcId: string, choice: DialogueChoice) {
+      if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       const result = talk(state.world, state.relationships, state.dialogue, id, context(npcId), choice);
+      if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, result.entry.time, [reactionEffect(result.entry)]);
       publish(id, npcId, choice.topic, result.entry.change < 0 ? 'hurt' : 'help'); return result;
     },
     giveGift(id: string, npcId: string, itemId: string) {
+      if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       if (!id || state.dialogue.memories[npcId]?.entries.some(m => m.id === id)) throw Error('Invalid or duplicate gift event');
       const ctx = context(npcId), entry = giveGift(state.shop, state.world, state.relationships, 'player', ctx.npc, itemId, ctx.time);
       const line = recordDialogue(state.dialogue, id, ctx.npc, entry);
+      if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, entry.time, [reactionEffect(entry)]);
       publish(id, npcId, entry.choice.topic, entry.change < 0 ? 'hurt' : 'help'); return { entry, line };
     },
     confess(id: string, npcId: string, consent: Consent) {
       if (!id) throw Error('Missing event ID');
-      const wasDating = isDating(state.dialogue, 'player', npcId), result = confess(state.dialogue, context(npcId), consent);
+      const ctx = context(npcId), wasDating = isDating(state.dialogue, 'player', npcId);
+      if (state.relationMode === 'bonds') ctx.value = canStartDating(readBond(state.bonds, 'player', npcId),
+        readBond(state.bonds, npcId, 'player'), consent) ? 90 : 0;
+      const result = confess(state.dialogue, ctx, consent);
       if (result.accepted && !wasDating) publish(id, npcId, '교제', 'dating'); return result;
     },
     requestMatch(request: MatchRequest) {
-      seedAcquaintances(); return requestMatch(state.matchmaking, state.encounters, state.world, request);
+      seedAcquaintances();
+      if (state.relationMode === 'legacy') return requestMatch(state.matchmaking, state.encounters, state.world, request);
+      const relationships = { ...state.world.relationships, [request.player.id]: {
+        ...state.world.relationships[request.player.id], [request.introducerId]:
+          friendly(readBond(state.bonds, request.introducerId, request.player.id)) ? 30 : 0 },
+        [request.introducerId]: Object.fromEntries(residents.map(n => [n.id,
+          readBond(state.bonds, request.introducerId, n.id).met ? 10 : 0])) };
+      return requestMatch(state.matchmaking, state.encounters, { relationships }, request);
     },
   };
   const tick = (realSeconds: number): SaveResult | undefined => {
@@ -324,10 +341,17 @@ export function createSession(storage: Storage, npcSeed?: number) {
                 !state.work.shifts.some(s => s.actorId === npc.id && (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
               startEmployeeShift(book, state.work, npc.id, b.placeId, now);
             if (npc.id === b.ownerId) continue;
-            const stock = b.store.stock[0], visitId = `${b.id}:${now.day}:${npc.id}`;
+            const visitId = `${b.id}:${now.day}:${npc.id}`;
+            const customer: Customer = { likes: npc.likes,
+              priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
+            const preferred = state.relationMode === 'bonds' && state.populationEconomy;
+            const need = preferred ? chooseNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
+              choice(state.npcSeed, `need:${visitId}`) / 0x100000000) : undefined;
+            const stock = preferred ? b.store.stock.find(s => s.itemId === need?.itemId) : b.store.stock[0];
             if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= 60 ||
                 b.store.visits.some(v => v.id === visitId) ||
                 funds(world.ledger, purses[npc.id]).spendable < stock.price ||
+                need && stock.price > need.maxPrice ||
                 dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
             if (stock.backroom + stock.displayed === 0) {
               const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
@@ -341,7 +365,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
             }
             restock(b.store, stock.itemId, 5);
             const visit = visitStore(b.store, world.ledger, visitId, npc.id,
-              { itemId: stock.itemId, maxPrice: stock.price }, 1, now);
+              need ?? { itemId: stock.itemId, maxPrice: stock.price }, customer.patienceMinutes, now);
             const sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
             if (sale.ok && !sale.duplicate) {
               const life = state.shop.residents[npc.id] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
