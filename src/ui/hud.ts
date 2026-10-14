@@ -11,7 +11,6 @@ import { applyBondEvent, reactionEffect, readBond } from '../sim/bonds';
 import { relationshipStage, type Interaction } from '../sim/relationship';
 import { useItem } from '../sim/shop';
 import { respondToMatch } from '../sim/matchmaking';
-import { startWork } from '../sim/work';
 import { restock, visitStore } from '../sim/store';
 import { checkoutBusiness, type Business } from '../sim/business';
 import { trade } from '../sim/market';
@@ -160,7 +159,9 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     }
   }
   function work(job: Job) {
-    const shift = startWork(state.work, 'player', job.id, job.placeId, now());
+    const result = session.startWork(job.id);
+    if (!result.ok) return problems[result.error] ?? result.error;
+    const { shift } = result;
     session.tick(job.durationMinutes / state.world.clock.minutesPerSecond); // working passes the shift's time
     return shift.paid ? `${job.durationMinutes / 60}시간 일하고 ${shift.wage}결 받았어요` : '일은 끝났지만 급여가 아직이에요';
   }
