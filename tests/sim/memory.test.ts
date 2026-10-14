@@ -34,3 +34,31 @@ it('ranks relevant memories, excludes future and expired records, bounds storage
   expect(() => minuteOf({ ...time, minute: 60 })).toThrow();
   expect(() => minuteOf({ ...time, day: Number.MAX_SAFE_INTEGER })).toThrow();
 });
+
+import { rememberSharedEvent, type SharedEvent } from '../../src/sim/memory';
+const sharedEvent: SharedEvent = { id: 'meal:1', actorId: 'player', kind: 'meal',
+  participants: ['player', 'aro'], placeId: 'cafe', placeName: '잔물결 찻방',
+  activityName: '잔향 차 식사', time, status: 'completed' };
+it.each(['planned', 'failed'] as const)('does not remember a %s shared event', status => {
+  const state = createMemoryState('aro');
+  expect(rememberSharedEvent(state, { ...sharedEvent, status })).toBe(false);
+  expect(state.entries).toEqual([]);
+});
+it.each(['meal', 'shared-work'] as const)('records completed %s participants, place and source once', kind => {
+  const state = createMemoryState('aro'), participants = ['player', 'aro'];
+  expect(rememberSharedEvent(state, { ...sharedEvent, kind, participants })).toBe(true);
+  participants[1] = 'other';
+  expect(rememberSharedEvent(state, { ...sharedEvent, kind })).toBe(false);
+  expect(state.entries[0]).toMatchObject({ kind, participants: ['player', 'aro'],
+    placeId: 'cafe', sourceEventId: 'meal:1', change: 0 });
+  const recalled = recall(state, time, { subjectId: 'player' })[0];
+  recalled.participants!.pop();
+  expect(state.entries[0].participants).toEqual(['player', 'aro']);
+  expect(() => rememberSharedEvent(createMemoryState('sori'), sharedEvent)).toThrow();
+});
+it('bounds completed shared memories like legacy memories', () => {
+  const state = createMemoryState('aro');
+  for (let i = 0; i <= MEMORY_LIMIT; i++) rememberSharedEvent(state, { ...sharedEvent, id: `meal:${i}` });
+  expect(state.entries).toHaveLength(MEMORY_LIMIT);
+  expect(state.entries.some(memory => memory.id === 'meal:0')).toBe(false);
+});

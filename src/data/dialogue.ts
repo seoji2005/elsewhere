@@ -2,6 +2,16 @@ export interface DialogueTemplate {
   greeting: string; familiar: string; chat: string; repeat: string;
   gift: string; dislikedGift: string; accept: string; refuse: string;
 }
+export const sharedMemoryTemplates = {
+  quiet: { meal: '{place}에서 함께 먹은 {activity}, 아직 여운이 남아 있어요.',
+    'shared-work': '{place}에서 함께 한 {activity}, 그때의 손길이 생각나요.' },
+  social: { meal: '{place}에서 같이 먹은 {activity}, 즐거웠죠! 또 함께 먹어요.',
+    'shared-work': '{place}에서 같이 한 {activity}, 함께하니 즐거웠어요!' },
+  practical: { meal: '{place}에서 함께 먹은 {activity}, 든든했습니다.',
+    'shared-work': '{place}에서 함께 한 {activity}, 덕분에 잘 끝냈습니다.' },
+  lise: { meal: '{place}에서 같이 먹은 {activity}, 네 몫까지 기억하고 있어.',
+    'shared-work': '{place}에서 같이 한 {activity}, 네가 맡은 분량도 기억해. …고마워.' },
+} as const;
 // Original lines for Gyeol's residents; no source-game dialogue.
 export const dialogueTemplates: Record<string, DialogueTemplate> = {
   aro: {

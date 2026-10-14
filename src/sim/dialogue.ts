@@ -1,4 +1,4 @@
-import { dialogueTemplates } from '../data/dialogue';
+import { dialogueTemplates, sharedMemoryTemplates } from '../data/dialogue';
 import type { Npc } from '../data/npcs';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
@@ -29,13 +29,32 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
   const template = dialogueTemplates[ctx.npc.id];
   const memories = state.memories[ctx.npc.id];
-  const past = memories ? recall(memories, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+  const now = minuteOf(ctx.time);
+  const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
+    (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
+    && now - memory.created >= 1440 && memory.participants?.includes(ctx.actorId)
+    && memory.participants.includes(ctx.npc.id)) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+  const past = !shared && memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
+    (memory.kind === 'gift' || memory.kind === 'chat') && memory.mentionedAt === undefined
+    && now - memory.created >= 1440) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
   const familiar = ctx.value >= 30;
+  let sharedLine: string | undefined;
+  if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
+    const style = ctx.npc.id === 'lise' && familiar ? 'lise' : ctx.npc.traits.includes('practical')
+      ? 'practical' : ctx.npc.traits.includes('social') || ctx.npc.traits.includes('playful') ? 'social' : 'quiet';
+    sharedLine = sharedMemoryTemplates[style][shared.kind]
+      .replace('{place}', () => shared.placeName ?? shared.placeId ?? '')
+      .replace('{activity}', () => shared.topic);
+    memories.entries.find(memory => memory.id === shared.id)!.mentionedAt = now;
+  }
+  if (!shared && familiar && past && memories) {
+    memories.entries.find(memory => memory.id === past.id)!.mentionedAt = now;
+  }
   const choices: DialogueChoice[] = ctx.npc.likes.map((topic, index) => ({
     id: `chat:${index}`, topic, tone: ctx.npc.traits[0] ?? 'quiet',
   }));
-  return { line: familiar && past && past.created < minuteOf(ctx.time)
-    ? memoryLine(past) : familiar ? template.familiar : template.greeting,
+  return { line: sharedLine ?? (familiar && past && past.created < now
+    ? memoryLine(past) : familiar ? template.familiar : template.greeting),
     // The legacy 90-point label is numeric; dating is only established by mutual consent.
     stage: ctx.value >= 90 && !isDating(state, ctx.actorId, ctx.npc.id)
       ? '호감' : relationshipStage(ctx.value), choices };
