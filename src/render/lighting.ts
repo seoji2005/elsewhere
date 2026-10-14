@@ -5,7 +5,8 @@ import { DirectionalLight, HemisphereLight, PCFShadowMap,
 // Original implementation; distances assume roughly one world unit per metre.
 // static: the shadow map is drawn once and again only after update() or setMapSize() (sun or scene changed).
 export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
-  center = new Vector3(), radius = 14, mapSize = 512, mode: 'off' | 'static' | 'dynamic' = 'dynamic') {
+  center = new Vector3(), radius = 14, mapSize = 512, mode: 'off' | 'static' | 'dynamic' = 'dynamic',
+  toSun = new Vector3(-0.8, Math.tan(11 * Math.PI / 180), 0.6)) {
   const previous = { enabled: renderer.shadowMap.enabled,
     type: renderer.shadowMap.type, autoUpdate: renderer.shadowMap.autoUpdate };
   renderer.shadowMap.enabled = mode !== 'off';
@@ -20,7 +21,7 @@ export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -0.0002;
   sun.shadow.normalBias = 0.04;
-  const offset = new Vector3(-0.8, Math.tan(11 * Math.PI / 180), 0.6).normalize().multiplyScalar(radius * 3);
+  const offset = toSun.clone().normalize().multiplyScalar(radius * 3);
   function update(target: Vector3) {
     sun.target.position.copy(target);
     sun.position.copy(target).add(offset);

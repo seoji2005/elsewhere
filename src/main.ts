@@ -10,6 +10,8 @@ import { adaptiveResolution } from './render/resolution';
 import { CheapBloom } from './render/cheapBloom';
 import { duskLUT } from './render/duskLUT';
 import { loadCharacter } from './player/character';
+import { loadAvatar } from './anime/avatar';
+import { cloudCards } from './anime/clouds';
 import { playerControls } from './player/controls';
 import { followPlayer } from './player/player';
 import { hud } from './ui/hud';
@@ -17,12 +19,14 @@ import { debugOverlay } from './ui/debug';
 import { paint } from './scene/props';
 
 const query = new URLSearchParams(location.search);
-const look = query.get('look') === 'a' ? 'a' : 'b';
+// style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
+const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
+const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
 // Phone measurement switches (?debug=1 shows fps, render height, draw calls, triangles):
 // msaa=0|4, bloom=0|1, lut=0|1, shadow=off|static|dynamic, dpr=<fixed pixel ratio>.
 // A switch given in the URL is left alone by the automatic quality ladder.
 const msaa = Number(query.get('msaa') ?? (look === 'a' ? 4 : 0)) > 0 ? 4 : 0;
-const bloom = query.get('bloom') !== '0', grade = query.get('lut') !== '0';
+const bloom = query.get('bloom') !== '0', grade = query.get('lut') === '1' || (!anime && query.get('lut') !== '0');
 const shadow = (['off', 'static', 'dynamic'] as const).find(mode => mode === query.get('shadow')) ?? 'static';
 const fixedDpr = Number(query.get('dpr')) > 0 ? Math.min(4, Number(query.get('dpr'))) : undefined;
 const post = look === 'b' && (bloom || grade);
@@ -32,14 +36,15 @@ const renderer = new T.WebGLRenderer({ antialias: !post && msaa > 0 });
 renderer.toneMapping = T.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 if (look === 'b' && !post) { // no post passes: the same Reinhard curve and exposure as duskLUT, in the materials
-  renderer.toneMapping = T.ReinhardToneMapping;
+  renderer.toneMapping = anime ? T.NeutralToneMapping : T.ReinhardToneMapping;
   renderer.toneMappingExposure = 1.15;
 }
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-const [world, character] = await Promise.all([buildCorner(scene), loadCharacter()]);
-applyLook(scene, look);
+const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera) : loadCharacter()]);
+applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6);
+if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
 character.group.position.set(-7, 0, -6);
 scene.add(character.group);
@@ -57,20 +62,36 @@ if (blob) {
 }
 const ui = hud();
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
+// Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
+controls.state.dist = Number(query.get('dist')) || controls.state.dist;
+controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
+const move = Number(query.get('move')) || 0;
 const follow = followPlayer(character.group, camera, world);
-const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 55, 1024, shadow);
+// Anime: the sun comes from behind the default view, so the façades in sight are lit and shadows fall away.
+const sunElevation = day ? 36 : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
+toSun.y = Math.tan(sunElevation * Math.PI / 180) * Math.hypot(toSun.x, toSun.z);
+const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 55, 1024, shadow, toSun);
 lighting.fill.intensity = look === 'a' ? 0.85 : 1.7;
+if (anime) { // warm-white afternoon sun over a sky-blue fill, or a low orange sun under a lavender sky
+  lighting.sun.color.set(day ? '#fff0d9' : '#ffaa70');
+  lighting.sun.intensity = day ? 3.2 : 3;
+  lighting.fill.color.set(day ? '#b5d4ff' : '#a7a0dc');
+  lighting.fill.groundColor.set(day ? '#a8957f' : '#7a5c5c');
+}
 if (look === 'b') { // cool sky bounce from the side away from the sun, so façades facing different ways read apart
   const bounce = new T.DirectionalLight('#8fa5d9', 0.8);
   bounce.position.set(0.55, 0.6, -0.6);
   scene.add(bounce);
 }
-const horizon = look === 'a' ? '#d9b499' : '#cfa898';
+// Sky gradient: zenith, horizon (= fog), band above the horizon, sun glow.
+const [top, horizon, band, glow] = anime ? day ? ['#2f72d4', '#d4e8f6', '#8cc0f0', '#fff0c8']
+  : ['#3a4b8c', '#f7b796', '#c99bc8', '#ff9a52'] : [look === 'a' ? '#7296bd' : '#33497d', look === 'a' ? '#d9b499' : '#cfa898',
+  '#9c84b0', '#ff9a52'];
 cornerAtmosphere(scene, horizon, 48, 155);
 const sky = new T.Mesh(new T.SphereGeometry(300, 48, 24), new T.ShaderMaterial({
   side: T.BackSide, depthWrite: false,
-  uniforms: { top: { value: new T.Color(look === 'a' ? '#7296bd' : '#33497d') }, horizon: { value: new T.Color(horizon) },
-    band: { value: new T.Color('#9c84b0') }, glow: { value: new T.Color('#ff9a52') },
+  uniforms: { top: { value: new T.Color(top) }, horizon: { value: new T.Color(horizon) },
+    band: { value: new T.Color(band) }, glow: { value: new T.Color(glow) },
     sun: { value: lighting.sun.position.clone().sub(lighting.sun.target.position).normalize() } },
   vertexShader: 'varying vec3 dir; void main(){dir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
   // B: horizon (= fog colour) -> lavender band -> deep blue zenith, warm glow toward the sun, dithered.
@@ -87,6 +108,7 @@ const sky = new T.Mesh(new T.SphereGeometry(300, 48, 24), new T.ShaderMaterial({
 }));
 sky.frustumCulled = false;
 scene.add(sky);
+if (anime) sky.add(cloudCards(day ? '#ffffff' : '#ffc6b4'));
 if (look === 'a') {
   const pmrem = new T.PMREMGenerator(renderer);
   const room = new RoomEnvironment();
@@ -103,6 +125,7 @@ if (composer && finalPass) {
   renderer.toneMapping = T.NoToneMapping; // the LUT pass compresses HDR itself
   [new RenderPass(scene, camera), bloomPass, finalPass].forEach(pass => pass && composer.addPass(pass));
   finalPass.glow(bloomPass?.glow ?? null);
+  if (anime) { finalPass.material.defines.NEUTRAL = ''; finalPass.uniforms.exposure.value = 1; }
 }
 renderer.info.autoReset = false; // keep whole-frame counts for diagnostics
 // Automatic quality, cheapest loss first: bloom 1/8 res -> bloom off -> shadow 512 -> pixel ratio down to 1.6.
@@ -128,7 +151,7 @@ let previous = performance.now(), status = { speed: 0, near: false };
 renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
-  status = follow(Math.min(dt, 0.1), controls.stickInput(), controls.state);
+  status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : controls.stickInput(), controls.state);
   character.update(status.speed, Math.min(dt, 0.1));
   ui.door(status.near);
   sky.position.copy(camera.position);
@@ -140,8 +163,8 @@ renderer.setAnimationLoop(now => {
   renderer.domElement.dataset.ready = 'true';
 });
 // Read-only diagnostics for browser verification and tests/play.
-Object.assign(window, { cornerDiagnostics: () => ({ look, ...renderer.info.render,
+Object.assign(window, { cornerDiagnostics: () => ({ look, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
-  sunElevation: 11, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
+  sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
   player: character.group.position.toArray(), ...status }) });

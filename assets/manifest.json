@@ -54,5 +54,12 @@
       "k-furniture-kit/Models/GLTF format/bench.glb",
       "k-furniture-kit/Models/GLTF format/pottedPlant.glb"
     ]
+  },
+  "avatar": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/avatarsample_f",
+    "files": [
+      "AvatarSample_F.vrm"
+    ],
+    "maxTexture": 1024
   }
 }
