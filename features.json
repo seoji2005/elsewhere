@@ -15,6 +15,14 @@
       "owner": "user",
       "desc": "한 모퉁이 화면 선택",
       "check": "사용자가 2안 중 하나에 👍",
+      "passes": true
+    },
+    {
+      "id": "M1-04",
+      "stage": "M1",
+      "owner": "user",
+      "desc": "한 모퉁이 B안 마감: 투박함을 없앤다",
+      "check": "사용자가 폰에서 '투박하지 않다'",
       "passes": false
     },
     {
