@@ -8,6 +8,9 @@ import { whereIs } from '../../src/sim/npc';
 import { npcs } from '../../src/data/npcs';
 import { gameTime } from '../../src/sim/clock';
 import { generate } from '../../src/sim/npcgen';
+import { applyBondEvent, edgeKey, readBond } from '../../src/sim/bonds';
+import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
+import { buildDialogue } from '../../src/sim/dialogue';
 function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
@@ -57,7 +60,7 @@ it('restores seeded residents, migrates seedless v2 saves and resolves generated
   first.saveNow(); expect(createSession(storage).state.npcSeed).toBe(123);
   saved.state.npcSeed = 456; storage.setItem(SESSION_KEY, JSON.stringify(saved));
   expect(first.state.world.people).not.toEqual(createSession(storage).state.world.people);
-  delete saved.state.npcSeed; storage.setItem(SESSION_KEY, JSON.stringify(saved)); const old = createSession(storage);
+  saved.version = 2; delete saved.state.npcSeed; storage.setItem(SESSION_KEY, JSON.stringify(saved)); const old = createSession(storage);
   expect(old.loadResult.ok).toBe(true); expect(old.state.npcSeed).toBe(0); expect(Object.keys(old.state.world.people)).toHaveLength(57);
   const npc = generate(0, 50)[0], time = { day: 1, hour: 12, minute: 0 }, placeId = whereIs(npc, time);
   old.state.player.placeId = placeId;
@@ -66,4 +69,57 @@ it('restores seeded residents, migrates seedless v2 saves and resolves generated
   old.tick(720); expect(old.state.world.people[npc.id].placeId).toBe(placeId);
   for (const n of generate(0, 50)) expect(old.state.world.people[n.id].placeId).toBe(whereIs(n, time));
   expect(old.state.matchmaking.appointments[0].status).toBe('met'); expect(old.state.encounters.met[0].npcId).toBe(npc.id);
+});
+it('round trips v3 memories, dating, bond receipts/budgets and ripple notices without replay', () => {
+  const storage = memory(), session = createSession(storage), { state } = session;
+  expect(state.relationMode).toBe('bonds'); expect(state.bonds.edges).toEqual({});
+  const time = { day: 1, hour: 0, minute: 0 }, npc = npcs.find(n => n.id === 'lise')!;
+  state.dialogue.memories.lise = createMemoryState('lise');
+  rememberSharedEvent(state.dialogue.memories.lise, { id: 'meal', actorId: 'player', kind: 'meal',
+    participants: ['player', 'lise'], placeId: 'cafe', placeName: '카페', activityName: '차', time, status: 'completed' });
+  state.dialogue.dating.push({ actorId: 'player', npcId: 'lise' });
+  const effects = [{ fromId: 'lise', toId: 'player', delta: { trust: 10 }, met: true as const }];
+  applyBondEvent(state.bonds, 'meal', time, effects);
+  state.ripple.notices.push({ eventId: 'meal', observerId: 'aro', sourceId: 'aro', created: 0, learned: 0,
+    hops: 0, mode: 'witness', kind: 'help', actorId: 'player', targetId: 'lise', topic: '차' });
+  session.tick(1440); const ctx = { actorId: 'player', npc, time: gameTime(state.world.clock), value: 30 };
+  const recalled = buildDialogue(state.dialogue, ctx).line; session.saveNow();
+  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); expect(saved.version).toBe(3);
+  expect(Object.keys(saved.state.world.people).some(id => id.startsWith('generated-'))).toBe(false);
+  const next = createSession(storage); expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(state);
+  expect(next.state.dialogue.memories.lise.entries[0].mentionedAt).toBe(1440);
+  expect(buildDialogue(next.state.dialogue, ctx).line).not.toBe(recalled);
+  expect(applyBondEvent(next.state.bonds, 'meal', time, effects)).toBe(false);
+  applyBondEvent(next.state.bonds, 'other', time, effects); expect(readBond(next.state.bonds, 'lise', 'player').trust).toBe(10);
+});
+it.each([1, 2])('migrates v%i to legacy v3 while preserving directional scores and meetings', version => {
+  const storage = memory(), { state } = createSession(storage);
+  state.world.relationships.player = { lise: 35 }; state.world.relationships.lise = { player: -5 };
+  state.encounters.met.push({ actorId: 'player', npcId: 'aro', day: 1 });
+  const { dialogue: _dialogue, bonds: _bonds, ripple: _ripple, relationMode: _mode, ...v2 } = state;
+  storage.setItem(SESSION_KEY, version === 1 ? saveWorld(state.world) : JSON.stringify({ version: 2, state: v2 }));
+  const next = createSession(storage); expect(next.loadResult.ok).toBe(true); expect(next.state.relationMode).toBe('legacy');
+  expect(next.state.dialogue).toEqual({ memories: {}, dating: [] }); expect(next.state.ripple.notices).toEqual([]);
+  expect(readBond(next.state.bonds, 'player', 'lise')).toMatchObject({ legacyScore: 35, met: true, affection: 0 });
+  expect(readBond(next.state.bonds, 'lise', 'player').legacyScore).toBe(-5);
+  if (version === 2) expect(readBond(next.state.bonds, 'player', 'aro').met).toBe(true);
+  expect(next.state.world.relationships).toEqual(state.world.relationships); next.saveNow();
+  expect(JSON.parse(storage.getItem(SESSION_KEY)!).version).toBe(3);
+  expect(createSession(storage).state.bonds).toEqual(next.state.bonds);
+});
+it.each<[string, (state: ReturnType<typeof createSession>['state']) => void]>([
+  ['axis', s => { s.bonds.edges[edgeKey('player', 'lise')] = { affection: 101, trust: 0, respect: 0, comfort: 0, romance: 0, met: true }; }],
+  ['edge key', s => { s.bonds.edges.bad = { affection: 0, trust: 0, respect: 0, comfort: 0, romance: 0, met: false }; }],
+  ['budget', s => { s.bonds.gained[JSON.stringify(['player', 'lise', 1])] = 11; }],
+  ['receipt', s => { s.bonds.applied = [null as unknown as string]; }],
+  ['notices', s => { s.ripple.notices = {} as typeof s.ripple.notices; }],
+  ['notice entry', s => { s.ripple.notices = [null as unknown as typeof s.ripple.notices[number]]; }],
+  ['memory entries', s => { s.dialogue.memories.lise = { npcId: 'lise', entries: [null as unknown as typeof s.dialogue.memories.lise.entries[number]] }; }],
+  ['dating', s => { s.dialogue.dating = [{ actorId: 'player', npcId: 'player' }]; }],
+  ['mode', s => { s.relationMode = 'invalid' as typeof s.relationMode; }],
+])('backs up invalid v3 %s before saving a fresh session', (_name, damage) => {
+  const storage = memory(), { state } = createSession(storage); damage(state);
+  const raw = JSON.stringify({ version: 3, state }); storage.setItem(SESSION_KEY, raw);
+  const next = createSession(storage); expect(next.loadResult.ok).toBe(false); expect(storage.getItem(`${SESSION_KEY}.backup`)).toBe(raw);
+  expect(next.state.relationMode).toBe('bonds'); expect(next.saveNow().ok).toBe(true);
 });
