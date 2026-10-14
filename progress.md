@@ -30,3 +30,13 @@
 - ~/.claude 안은 셸로 쓰지 않는다(권한 창). 진행 현황은 ~/ops/board-tasks.md.
 - Codex: ~/ops/bin/codex-game [-w 이름] [-m gpt-6-astra] [-e high]. 스크린샷: ~/ops/bin/gha-shots. 체험판: ~/ops/bin/play-publish (https://3-34-132-123.sslip.io, 이름 seoji).
 
+
+## 야간 계획 (2026-10-14 밤~10-15 아침, 사용자: 피드백 없어도 확실한 일은 계속, 확인 가능 ~21:00·22:00~24:00)
+마스터가 약 40분마다 점검(세션 cron). 동시 3개까지. 사용자 판단이 필요한 건 아래 "사용자 확인 대기"에 모으고 멈추지 않는다.
+1. C023 SD+생활복 시제품(Codex astra) → 마스터 품질 평가(GHA 스크린샷) → 필요하면 fable 마감 → 체험판 게시, 확인 대기
+2. C024 게임 세션·자동 저장(Codex) → 검사·합치기
+3. R013a CharacterStudio 분석(Codex astra) → C025 NPC 여러 명 등장(부품 섞기·합치기, 남성 VRM 포함) 카드
+4. R014 관계 방향·다축(Ensemble·ClanGen, Codex -R) → C026 관계 다축화 + M1-20 회상 대사(sim, 테스트)
+5. C024 뒤: 세션을 화면에 연결(시각·돈 HUD 최소, 자동 저장 연결)
+사용자 확인 대기:
+- (없음)
