@@ -3,7 +3,7 @@ import { WebGLRenderer } from 'three';
 
 // Call sample(raw RAF delta in seconds); simulation-clamped delta hides stalls.
 export function adaptiveResolution(renderer: WebGLRenderer,
-  maxDpr = Math.min(window.devicePixelRatio || 1, 1.25),
+  maxDpr = Math.min(window.devicePixelRatio || 1, 2.5), // phones are ~3x; 1.25 looked like 480p
   onResize?: (dpr: number, width: number, height: number) => void) {
   if (!(maxDpr > 0 && Number.isFinite(maxDpr))) throw new RangeError('Invalid DPR');
   const previousDpr = renderer.getPixelRatio();
@@ -26,8 +26,8 @@ export function adaptiveResolution(renderer: WebGLRenderer,
     elapsed += dt; frames++;
     if (elapsed < 4) return;
     const fps = frames / elapsed;
-    const next = fps < 30 ? Math.max(0.6, multiplier - 0.1)
-      : fps >= 58 ? Math.min(1, multiplier + 0.1) : multiplier;
+    const next = fps < 50 ? Math.max(0.5, multiplier - 0.1)
+      : fps >= 58 ? Math.min(1, multiplier + 0.05) : multiplier;
     elapsed = frames = 0;
     if (Math.abs(next - multiplier) > 0.001) { multiplier = next; apply(); }
   }, dispose() {
