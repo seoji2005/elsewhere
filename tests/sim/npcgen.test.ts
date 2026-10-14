@@ -56,11 +56,12 @@ it('keeps all weekly intervals within capacity including core residents', () => 
   for (const seed of [0, 1, 21, 42, 0xffffffff]) {
     const generated = generate(seed, seed === 42 ? 66 : 50); // 42: fill to capacity (66 with 6 core residents)
     const residents: Npc[] = [...npcs, ...generated];
-    for (const [index, npc] of generated.entries()) {
+    for (const npc of generated) {
       expect(npc.schedule).toHaveLength(7);
-      const walk = 1080 + Math.floor(index / 12) * 30;
-      expect(npc.schedule.filter(day => day.some(s => s.fromMinute === walk && s.placeId === 'park') &&
-        day.some(s => s.fromMinute === walk + 30 && s.placeId === day[0].placeId))).toHaveLength(1);
+      const holiday = npc.schedule.filter(day => day.length === 3 && day[1].fromMinute >= 600 &&
+        ['park', 'cafe', 'shop'].includes(day[1].placeId) && day[2].placeId === day[0].placeId &&
+        day[2].fromMinute - day[1].fromMinute <= 240 && day[2].fromMinute - day[1].fromMinute >= 120);
+      expect(holiday.length).toBeGreaterThanOrEqual(1);
       expect(new Set(npc.schedule.flat().map(slot => slot.placeId)).size).toBeGreaterThanOrEqual(2);
       for (const day of npc.schedule) {
         expect(day[0].fromMinute).toBe(0);
@@ -98,4 +99,18 @@ it('generates 50 residents within the 50ms target on this host (phone requires d
   console.info(`generate(21, 50): ${elapsed.toFixed(2)}ms`);
   expect(result).toHaveLength(50);
   expect(elapsed).toBeLessThan(50);
+});
+
+it('increases weekly holiday daytime park and cafe occupancy over evening-only outings', () => {
+  const generated = generate(123, 50), counts = { before: 0, after: 0, holidayVisitors: 0 };
+  for (let day = 1; day <= 7; day++) for (const npc of [...npcs, ...generated]) {
+    const slots = npc.schedule[day - 1], time = { day, hour: 14, minute: 0 };
+    const holiday = generated.includes(npc as typeof generated[number]) && slots[2].fromMinute - slots[1].fromMinute <= 240;
+    const after = whereIs(npc, time), before = holiday ? slots[0].placeId : after;
+    if (['park', 'cafe'].includes(before)) counts.before++;
+    if (['park', 'cafe'].includes(after)) counts.after++;
+    if (holiday && after !== slots[0].placeId) counts.holidayVisitors++;
+  }
+  console.log('C046 weekly 14:00 park/cafe occupancy', counts);
+  expect(counts.after).toBeGreaterThan(counts.before);
 });

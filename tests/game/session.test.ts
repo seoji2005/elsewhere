@@ -158,7 +158,8 @@ it('conserves all seven wallets for 30 days and produces identical split/reloade
   expect(split.state).toEqual(whole.state); expect(whole.state.settledDay).toBe(30);
   const { balances, transactions } = whole.state.world.ledger;
   expect(Object.keys(balances).filter(id => balances[id] > 0).sort()).toEqual(['aro', 'iri', 'lise', 'nuel', 'player', 'sori', 'velo']);
-  expect(transactions.length + whole.state.world.ledger.history!.ids.length).toBeGreaterThan(30);
+  expect(transactions.length + whole.state.world.ledger.history!.ids.length +
+    Object.values(whole.state.world.ledger.history!.retired ?? {}).flatMap(group => Object.values(group)).flat().length).toBeGreaterThan(30);
   expect(transactions.every(t => Object.hasOwn(balances, t.from) && Object.hasOwn(balances, t.to))).toBe(true);
   expect(whole.state.work.shifts.every(s => s.paid)).toBe(true);
 });
@@ -334,6 +335,7 @@ it('connects generated dialogue, gifts, dating, introductions and public notices
   session.tick(720); const time = gameTime(state.world.clock), npc = residents.find(n => whereIs(n, time) === 'cafe')!;
   state.player.placeId = 'cafe'; const observer = residents.find(n => n.id !== npc.id && whereIs(n, time) === 'cafe')!;
   const opening = session.buildDialogue(npc.id); expect(session.talk('chat', npc.id, opening.choices[0]).line).toBeTruthy();
+  expect(state.ripple.notices.some(n => n.eventId === 'chat')).toBe(false);
   state.shop.residents.player = { inventory: { scarf: 1 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
   expect(session.giveGift('gift', npc.id, 'scarf').line).toBeTruthy();
   expect(() => session.giveGift('gift', npc.id, 'scarf')).toThrow();
@@ -608,5 +610,6 @@ it('compacts 180-day finances with exact totals, retries, stock prices and split
   unpruned.state.book.businesses.forEach((b: typeof state.book.businesses[number], i: number) => b.store.events = [...events[i].values()]);
   const bytes = Buffer.byteLength(storage.getItem(SESSION_KEY)!), withoutPruning = Buffer.byteLength(JSON.stringify(unpruned));
   console.log('C044 180-day save bytes', { bytes, withoutPruning });
-  expect(bytes).toBeLessThan(300 * 1024); expect(bytes).toBeLessThan(withoutPruning);
+  expect(ledger.history!.ids.length).toBeLessThanOrEqual(50);
+  expect(bytes).toBeLessThanOrEqual(159 * 1024); expect(bytes).toBeLessThan(withoutPruning);
 }, 15000);

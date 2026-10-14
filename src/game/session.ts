@@ -207,11 +207,20 @@ export function createSession(storage: Storage, npcSeed?: number) {
           checkShape(history, { ids: [], days: {} });
           if (!history.ids.every(id => typeof id === 'string' && id.length > 0) ||
               new Set(history.ids).size !== history.ids.length) throw Error('Invalid retired IDs');
+          if (history.retired !== undefined) {
+            checkShape(history.retired, {});
+            for (const [day, group] of Object.entries(history.retired)) {
+              if (!Number.isSafeInteger(Number(day)) || Number(day) < 1) throw Error('Invalid retired day');
+              checkShape(group, {});
+              for (const ids of Object.values(group)) if (!Array.isArray(ids) ||
+                !ids.every(id => typeof id === 'string')) throw Error('Invalid grouped IDs');
+            }
+          }
           for (const [day, accounts] of Object.entries(history.days)) {
             if (!Number.isSafeInteger(Number(day)) || Number(day) < 1) throw Error('Invalid history day');
             checkShape(accounts, {});
-            for (const totals of Object.values(accounts)) if (!Array.isArray(totals) || totals.length !== 2 ||
-              !totals.every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid cashflow');
+            for (const totals of Object.values(accounts)) if (!Array.isArray(totals) || (totals.length < 2 || totals.length > 4) ||
+              !totals.every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid cashflow');
           }
         }
         for (const days of Object.values(state.revenueHistory)) {
@@ -316,7 +325,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       const result = talk(state.world, state.relationships, state.dialogue, id, context(npcId), choice);
       if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, result.entry.time, [reactionEffect(result.entry)]);
-      publish(id, npcId, choice.topic, result.entry.change < 0 ? 'hurt' : 'help'); return result;
+      return result;
     },
     giveGift(id: string, npcId: string, itemId: string) {
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');

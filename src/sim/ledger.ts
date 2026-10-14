@@ -10,7 +10,7 @@ export interface Transaction {
 }
 export interface LedgerState {
   balances: Record<string, number>; transactions: Transaction[];
-  history?: { ids: string[]; days: Record<string, Record<string, [number, number]>> };
+  history?: { retired?: Record<string, Record<string, string[]>>; ids: string[]; days: Record<string, Record<string, [number, number, number?, number?]>> };
 }
 export type TransferResult = { ok: true; duplicate: boolean } | { ok: false; error: string };
 const owns = (object: object, key: string) => Object.hasOwn(object, key);
@@ -23,7 +23,10 @@ export function createLedger(balances: Record<string, number> = {}): LedgerState
 }
 
 export function transfer(ledger: LedgerState, transaction: Transaction): TransferResult {
-  if (ledger.history?.ids.includes(transaction.id) || ledger.transactions.some(entry => entry.id === transaction.id))
+  const cut = transaction.id.lastIndexOf(':') + 1, prefix = transaction.id.slice(0, cut), suffix = transaction.id.slice(cut);
+  if (ledger.history?.ids.includes(transaction.id) ||
+      Object.values(ledger.history?.retired ?? {}).some(group => group[prefix]?.includes(suffix)) ||
+      ledger.transactions.some(entry => entry.id === transaction.id))
     return { ok: true, duplicate: true };
   const { id, from, to, amount, time } = transaction;
   if (!id || !Number.isSafeInteger(amount) || amount <= 0) return { ok: false, error: 'Invalid transaction' };
@@ -40,16 +43,29 @@ export function transfer(ledger: LedgerState, transaction: Transaction): Transfe
   return { ok: true, duplicate: false };
 }
 
-// Keep exact retired IDs: retries may supply a new date, and unpaid old work must still be payable.
+// Group exact IDs by original day and shared prefix; retry dates do not affect lookup.
 export function compactLedger(ledger: LedgerState, beforeDay: number): void {
   const history = ledger.history ??= { ids: [], days: {} };
+  const retire = (id: string, day: number) => {
+    if (id.startsWith('initial:')) { if (!history.ids.includes(id)) history.ids.push(id); return; }
+    const cut = id.lastIndexOf(':') + 1, group = (history.retired ??= {})[day] ??= {};
+    const suffixes = group[id.slice(0, cut)] ??= [];
+    if (!suffixes.includes(id.slice(cut))) suffixes.push(id.slice(cut));
+  };
+  const legacy = history.ids; history.ids = [];
+  for (const id of legacy) retire(id, 1);
   ledger.transactions = ledger.transactions.filter(t => {
     if (t.time.day >= beforeDay) return true;
-    history.ids.push(t.id);
+    retire(t.id, t.time.day);
     const day = history.days[t.time.day] ??= {};
     if (t.from !== t.to) {
       (day[t.from] ??= [0, 0])[1] += t.amount;
       (day[t.to] ??= [0, 0])[0] += t.amount;
+      if (t.reason.startsWith('Wage: ') || t.reason.startsWith('Store purchase: ') || t.reason.startsWith('Purchase: '))
+        for (const id of [t.from, t.to]) { day[id][2] ??= 0; day[id][3] ??= 0; }
+      if (t.reason.startsWith('Wage: ')) day[t.to][2] = (day[t.to][2] ?? 0) + t.amount;
+      if (t.reason.startsWith('Store purchase: ') || t.reason.startsWith('Purchase: '))
+        day[t.from][3] = (day[t.from][3] ?? 0) + t.amount;
     }
     return false;
   });
