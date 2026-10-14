@@ -21,7 +21,6 @@
       "id": "M1-10",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "동네 하나를 걸어 다니며 건물에 들어감",
       "check": "폰 조이스틱으로 2분 안에 집→가게→공원 이동",
       "passes": false
@@ -30,7 +29,6 @@
       "id": "M1-11",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "이름 있는 NPC 5명, 각자 하루 일과",
       "check": "같은 NPC를 아침·저녁 다른 장소에서 만난다",
       "passes": false
@@ -39,7 +37,6 @@
       "id": "M1-12",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "대화와 관계(호감 → 친구 → 연인 첫 단계)",
       "check": "한 NPC와 대화 선택지로 관계 단계가 오른다",
       "passes": false
@@ -48,7 +45,6 @@
       "id": "M1-13",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "돈 버는 길 하나(작은 가게 또는 아르바이트)",
       "check": "10분 안에 첫 수입",
       "passes": false
@@ -57,7 +53,6 @@
       "id": "M1-14",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "쓰는 곳(음식·옷·집 꾸미기)",
       "check": "번 돈으로 산 것이 화면이나 관계에 반영된다",
       "passes": false
@@ -66,7 +61,6 @@
       "id": "M1-15",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "가상 회사 3개 주식, 주가가 세계 사건·NPC 사업에 반응",
       "check": "사건 후 주가가 움직이고 사고팔 수 있다",
       "passes": false
@@ -75,7 +69,6 @@
       "id": "M1-16",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "자동 저장·이어 하기",
       "check": "앱을 닫았다 열어도 이어진다",
       "passes": false
