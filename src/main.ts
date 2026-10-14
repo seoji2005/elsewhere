@@ -17,6 +17,11 @@ import { followPlayer } from './player/player';
 import { hud } from './ui/hud';
 import { debugOverlay } from './ui/debug';
 import { paint } from './scene/props';
+import { createSession } from './game/session';
+import { localStorageAdapter } from './game/storage';
+import { npcs } from './data/npcs';
+import { doors } from './data/doors';
+import { generate } from './sim/npcgen';
 
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
@@ -60,7 +65,13 @@ if (blob) {
   character.group.traverse(object => { object.castShadow = false; });
   scene.add(blob);
 }
-const ui = hud();
+// The life simulation: clock, wallets, residents, shops and market; autosaves every game hour and when hidden.
+const session = createSession(localStorageAdapter());
+const ui = hud(session, [...npcs, ...generate(session.state.npcSeed, 50)]);
+if (!session.loadResult.ok) ui.say('저장이 손상돼 새로 시작했어요');
+addEventListener('visibilitychange', () => { if (document.hidden) session.saveNow(); });
+const [phoneTab, phonePlace] = (query.get('phone') ?? '').split(',');
+if (phoneTab) ui.open(phoneTab, phonePlace);
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
 controls.state.dist = Number(query.get('dist')) || controls.state.dist;
@@ -153,7 +164,9 @@ renderer.setAnimationLoop(now => {
   resolution.sample(dt); previous = now;
   status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : controls.stickInput(), controls.state);
   character.update(status.speed, Math.min(dt, 0.1));
-  ui.door(status.near);
+  const at = character.group.position; // only the two hero shops have a sim door; other façades stay closed
+  ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
+  if (session.tick(Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);
   renderer.info.reset();
@@ -167,4 +180,4 @@ Object.assign(window, { cornerDiagnostics: () => ({ look, style: anime ? 'anime'
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
   sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
-  player: character.group.position.toArray(), ...status }) });
+  player: character.group.position.toArray(), place: session.state.player.placeId, ...status }) });
