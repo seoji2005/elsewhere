@@ -88,7 +88,7 @@ export function resolveMatch(appointment: Appointment, encounters: EncounterStat
     ...(presence.npcPlaceId === appointment.placeId ? [] : [appointment.npcId]),
   ];
   if (elapsed >= 60) {
-    appointment.noShowBy = missing.length ? missing : [appointment.actorId, appointment.npcId];
+    appointment.noShowBy = missing;
     return appointment.status = 'no-show';
   }
   if (missing.length) return appointment.status;

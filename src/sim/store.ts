@@ -111,9 +111,11 @@ export function checkout(store: StoreState, ledger: LedgerState, visitId: string
   const result = transfer(ledger, { id, from: visit.actorId, to: store.accountId,
     amount: visit.price, time, reason });
   if (result.ok) {
-    stock.displayed--;
     visit.status = 'paid';
-    record(store, visit, time, 'purchased');
+    if (!result.duplicate) {
+      stock.displayed--;
+      record(store, visit, time, 'purchased');
+    }
   }
   return result;
 }

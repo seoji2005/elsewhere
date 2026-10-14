@@ -57,7 +57,7 @@ export function trade(market: MarketState, ledger: LedgerState, order: Trade, ma
       ledger.transactions.some(entry => entry.id === id)) return { ok: false, error: 'Invalid settlement' };
   const result = transfer(ledger, { id, time, from: side === 'buy' ? account : marketAccount,
     to: side === 'buy' ? marketAccount : account, amount, reason: `${side}:${companyId}:fee=${fee}` });
-  if (result.ok) {
+  if (result.ok && !result.duplicate) {
     if (!Object.hasOwn(market.holdings, account)) {
       Object.defineProperty(market.holdings, account, { value: {}, enumerable: true, writable: true, configurable: true });
     }

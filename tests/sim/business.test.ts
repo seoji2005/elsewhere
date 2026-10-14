@@ -48,3 +48,12 @@ it('requires paid producer orders and preserves goods and money on failures and 
   b.closedAt = 0; expect(order('closed').ok).toBe(false);
   expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
 });
+it('allows an employee to work after an ended unpaid shift while preventing overlap', () => {
+  const { state } = createSession({ getItem: () => null, setItem: () => {} }, 123);
+  const { book, work, world: { people, ledger } } = state, time = { day: 1, hour: 0, minute: 0 };
+  book.employment = []; hire(book, people, ledger, 'tea-counter', 'player', jobs[0], time);
+  const old = startEmployeeShift(book, work, 'player', 'cafe', time);
+  expect(() => startEmployeeShift(book, work, 'player', 'cafe', time)).toThrow();
+  expect(startEmployeeShift(book, work, 'player', 'cafe', { ...time, hour: 1 }).startedAt).toBe(old.endsAt);
+  expect(old.paid).toBe(false); expect(work.shifts).toContain(old);
+});

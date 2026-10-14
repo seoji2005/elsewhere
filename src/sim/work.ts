@@ -26,9 +26,6 @@ export function startWork(state: WorkState, actorId: string, jobId: string,
   if (localMinute < job.fromMinute || localMinute + job.durationMinutes > job.toMinute) {
     throw Error('Outside work hours');
   }
-  if (state.shifts.some(shift => shift.actorId === actorId && !shift.paid)) {
-    throw Error('Unfinished shift');
-  }
   if (state.shifts.some(shift => shift.actorId === actorId && shift.endsAt > now)) {
     throw Error('Overlapping shift');
   }

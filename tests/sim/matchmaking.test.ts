@@ -16,6 +16,14 @@ function setup(candidate: Npc = npcs[0]) {
   const offer = () => requestMatch(state, encounters, world, request);
   return { world, state, encounters, request, offer, candidate };
 }
+it('does not label either present participant absent when first evaluated after the window', () => {
+  const { offer, request, encounters, candidate } = setup(), date = offer()!;
+  respondToMatch(date, true, request.now);
+  expect(resolveMatch(date, encounters, candidate, { ...date.time, hour: 10 },
+    { playerPlaceId: 'office', npcPlaceId: 'office' })).toBe('no-show');
+  expect(date.noShowBy).toEqual([]); expect(encounters.met).toEqual([]);
+  expect(noShowEffects(date)).toEqual([]);
+});
 it('a friend introduces a compatible acquaintance with appearance, personality and a real appointment', () => {
   const { offer, request, state, encounters, candidate, world } = setup();
   const date = offer()!;

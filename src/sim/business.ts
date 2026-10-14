@@ -69,7 +69,7 @@ export function startEmployeeShift(book: BusinessBook, work: WorkState,
   const b = business(book, e.businessId), job = e.job;
   if (b.closedAt !== null || now < e.hiredAt || placeId !== b.placeId ||
       local < job.fromMinute || local + job.durationMinutes > job.toMinute ||
-      work.shifts.some(s => s.actorId === actorId && (!s.paid || s.endsAt > now))) throw Error('Shift unavailable');
+      work.shifts.some(s => s.actorId === actorId && s.endsAt > now)) throw Error('Shift unavailable');
   const shift: Shift = { id: `work:${JSON.stringify([actorId, job.id, now])}`, actorId,
     jobId: job.id, employerId: b.ownerId, startedAt: now, endsAt: now + job.durationMinutes,
     wage: job.hourlyWage * job.durationMinutes / 60, paid: false };
