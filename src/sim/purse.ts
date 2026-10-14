@@ -37,7 +37,8 @@ export function payPerson(people: People, ledger: LedgerState, tx: Transaction):
 }
 export function dayCashflow(ledger: LedgerState, purse: Purse, day: GameTime['day']) {
   if (!Number.isSafeInteger(day) || day < 1) throw Error('Invalid day');
-  let income = 0, expense = 0, wages = 0, consumption = 0;
+  const totals = ledger.history?.days[day]?.[purse.personId];
+  let [income, expense, wages, consumption] = [totals?.[0] ?? 0, totals?.[1] ?? 0, totals?.[2] ?? 0, totals?.[3] ?? 0];
   for (const t of ledger.transactions) {
     if (t.time.day !== day || t.from === t.to) continue;
     if (t.to === purse.personId) { income += t.amount; if (t.reason.startsWith('Wage: ')) wages += t.amount; }

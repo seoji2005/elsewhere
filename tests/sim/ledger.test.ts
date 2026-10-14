@@ -41,7 +41,7 @@ it('preserves daily income/expense and exact retired IDs even with a new retry d
   const ledger = createLedger({ shop: 100, player: 0 }); transfer(ledger, payment());
   transfer(ledger, { ...payment(), id: 'boundary', time: { day: 2, hour: 0, minute: 0 } });
   const balances = { ...ledger.balances }; compactLedger(ledger, 2);
-  expect(ledger.history).toEqual({ ids: ['pay-1'], days: { 1: { shop: [0, 30], player: [30, 0] } } });
+  expect(ledger.history).toEqual({ ids: [], retired: { 1: { '': ['pay-1'] } }, days: { 1: { shop: [0, 30], player: [30, 0] } } });
   expect(ledger.transactions.map(t => t.id)).toEqual(['boundary']);
   const restored = JSON.parse(JSON.stringify(ledger)); compactLedger(restored, 2); expect(restored).toEqual(ledger);
   expect(transfer(restored, { ...payment(), amount: 70, time: { day: 20, hour: 0, minute: 0 } })).toEqual({ ok: true, duplicate: true });

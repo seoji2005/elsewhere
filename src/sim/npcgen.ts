@@ -61,7 +61,7 @@ export function generate(seed: number, count: number): GeneratedNpc[] {
   };
   const pick = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)];
   const names = generatedNames.filter(name => !npcs.some(npc => npc.name === name));
-  return Array.from({ length: count }, (_, index) => {
+  const generated = Array.from({ length: limit }, (_, index) => {
     const archetype = pick(archetypes);
     const name = names.splice(Math.floor(random() * names.length), 1)[0];
     const home = pick(homes.filter(id => free[id] > 0));
@@ -69,7 +69,6 @@ export function generate(seed: number, count: number): GeneratedNpc[] {
     free[home]--; free[work.place]--;
     const start = (6 + Math.floor(random() * 5)) * 60;
     const restDay = Math.floor(random() * 7);
-    // Work ends by 18:00; at most 12 visitors plus 6 core residents share a walk.
     const walk = 1080 + Math.floor(index / 12) * 30;
     return {
       id: `generated-${seed}-${index}`, name, age: 18 + Math.floor(random() * 53), job: work.job,
@@ -91,4 +90,23 @@ export function generate(seed: number, count: number): GeneratedNpc[] {
           { fromMinute: start + 480, placeId: home }]),
     };
   });
+  // Plan against the complete roster so prefixes stay identical for every count.
+  const residents = [...npcs, ...generated];
+  for (const [index, npc] of generated.entries()) {
+    const day = npc.schedule.findIndex(slots => slots[1].fromMinute >= 1080);
+    const duration = 120 + index % 3 * 60;
+    const preferred = npc.likes.includes('잔향 차') ? 'cafe' : npc.traits.includes('practical') ? 'shop' : 'park';
+    const destinations = [preferred, ...['park', 'cafe', 'shop'].filter(id => id !== preferred)];
+    const plan = destinations.flatMap(placeId => Array.from({ length: 9 - duration / 60 }, (_, hour) =>
+      ({ placeId, from: (10 + hour) * 60 }))).find(({ placeId, from }) => {
+      const boundaries = new Set([from, ...residents.flatMap(n => n.schedule[day].map(s => s.fromMinute))]);
+      return [...boundaries].filter(m => m >= from && m < from + duration).every(minute =>
+        residents.filter(n => n.id !== npc.id && whereIs(n, { day: day + 1,
+          hour: Math.floor(minute / 60), minute: minute % 60 }) === placeId).length < placeCapacities[placeId]);
+    });
+    if (!plan) throw Error('No holiday outing capacity');
+    npc.schedule[day] = [{ fromMinute: 0, placeId: npc.schedule[day][0].placeId },
+      { fromMinute: plan.from, placeId: plan.placeId }, { fromMinute: plan.from + duration, placeId: npc.schedule[day][0].placeId }];
+  }
+  return generated.slice(0, count);
 }
