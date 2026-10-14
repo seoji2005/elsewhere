@@ -33,9 +33,9 @@ function createEconomy(world: ReturnType<typeof createWorld>) {
   }
   const purses = Object.fromEntries(['player', ...npcs.map(n => n.id)].map(id => [id, createPurse(people, ledger, id)]));
   const book: BusinessBook = { businesses: [], employment: [] };
-  openBusiness(book, people, ledger, 'tea-counter', 'nuel', 'cafe', 2,
+  openBusiness(book, people, ledger, 'tea-counter', 'nuel', 'cafe', 1,
     [{ itemId: 'tea', backroom: 300, displayed: 0, capacity: 5, price: 8 }], now);
-  for (const id of ['velo', 'lise']) hire(book, people, ledger, 'tea-counter', id, jobs[0], now);
+  hire(book, people, ledger, 'tea-counter', 'iri', jobs[0], now);
   return { purses, book, economyMinute: Math.floor(world.clock.totalMinutes), settledDay: now.day - 1 };
 }
 function freshState() {
@@ -142,30 +142,41 @@ export function createSession(storage: Storage) {
         }
         const template = createEconomy(createWorld());
         checkShape(state.book, template.book);
-        if (state.book.businesses.length !== 1 || state.book.employment.length !== 2) throw Error('Invalid business book');
-        checkShape(state.book.businesses[0], template.book.businesses[0]);
-        const b = state.book.businesses[0], expected = template.book.businesses[0];
-        if (b.id !== expected.id || b.ownerId !== expected.ownerId || b.placeId !== expected.placeId ||
-            b.store.accountId !== b.ownerId || b.capacity !== 2 || b.closedAt !== null ||
-            !Number.isSafeInteger(b.openedAt) || b.openedAt < 0 || b.openedAt > state.economyMinute) throw Error('Invalid business');
-        createStore(b.ownerId, b.store.stock);
-        for (const v of b.store.visits) {
-          checkShape(v, { id: '', actorId: '', need: { itemId: '', maxPrice: 0 }, joinedMinute: 0, patienceMinutes: 0, price: 0, status: '' });
-          if (!v.id || !state.purses[v.actorId] || !['waiting', 'paid', 'left'].includes(v.status) ||
-              ![v.joinedMinute, v.patienceMinutes, v.price, v.need.maxPrice].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid visit');
+        const dated = (n: number) => Number.isSafeInteger(n) && n >= 0 && n <= state.economyMinute;
+        if (!state.book.businesses.length || !state.book.employment.length ||
+            new Set(state.book.businesses.map(b => b.id)).size !== state.book.businesses.length) throw Error('Invalid business book');
+        for (const b of state.book.businesses) {
+          checkShape({ ...b, closedAt: null }, template.book.businesses[0]);
+          if (!b.id || !b.placeId || !state.purses[b.ownerId] ||
+              b.store.accountId !== b.ownerId || !Number.isSafeInteger(b.capacity) || b.capacity < 0 ||
+              !dated(b.openedAt) || b.closedAt !== null && (!dated(b.closedAt) || b.closedAt < b.openedAt)) throw Error('Invalid business');
+          createStore(b.ownerId, b.store.stock);
+          for (const v of b.store.visits) {
+            checkShape(v, { id: '', actorId: '', need: { itemId: '', maxPrice: 0 }, joinedMinute: 0, patienceMinutes: 0, price: 0, status: '' });
+            if (!v.id || !state.purses[v.actorId] || !['waiting', 'paid', 'left'].includes(v.status) ||
+                ![v.joinedMinute, v.patienceMinutes, v.price, v.need.maxPrice].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid visit');
+          }
+          for (const e of b.store.events) {
+            checkShape(e, { visitId: '', actorId: '', itemId: '', time: { day: 1, hour: 0, minute: 0 }, reason: '', amount: 0 });
+            validateTime(e.time);
+            if (!state.purses[e.actorId] || !['purchased', 'missing', 'expensive', 'unaffordable', 'impatient'].includes(e.reason) ||
+                !Number.isSafeInteger(e.amount) || e.amount < 0) throw Error('Invalid sale');
+          }
+          if (state.book.employment.filter(e => e.businessId === b.id && e.leftAt === null).length > b.capacity) throw Error('Invalid capacity');
         }
-        for (const e of b.store.events) {
-          checkShape(e, { visitId: '', actorId: '', itemId: '', time: { day: 1, hour: 0, minute: 0 }, reason: '', amount: 0 });
-          validateTime(e.time);
-          if (!state.purses[e.actorId] || !['purchased', 'missing', 'expensive', 'unaffordable', 'impatient'].includes(e.reason) ||
-              !Number.isSafeInteger(e.amount) || e.amount < 0) throw Error('Invalid sale');
+        for (const e of state.book.employment) {
+          checkShape({ ...e, leftAt: null }, template.book.employment[0]);
+          const b = state.book.businesses.find(b => b.id === e.businessId), j = e.job;
+          if (!b || !state.purses[e.actorId] || e.actorId === b.ownerId || !dated(e.hiredAt) || e.hiredAt < b.openedAt ||
+              e.leftAt !== null && (!dated(e.leftAt) || e.leftAt < e.hiredAt) ||
+              !j.id || !j.name || j.placeId !== b.placeId || j.employerId !== b.ownerId ||
+              ![j.fromMinute, j.toMinute, j.durationMinutes, j.hourlyWage, j.hourlyWage * j.durationMinutes / 60]
+                .every(n => Number.isSafeInteger(n) && n >= 0) || j.durationMinutes === 0 || j.hourlyWage === 0 ||
+              j.fromMinute >= j.toMinute || j.toMinute > 1440 || j.durationMinutes > j.toMinute - j.fromMinute) throw Error('Invalid employment');
+          if (e.leftAt === null && (b.closedAt !== null ||
+              state.book.employment.some(other => other !== e && other.actorId === e.actorId && other.leftAt === null) ||
+              state.book.businesses.some(other => other.ownerId === e.actorId && other.closedAt === null))) throw Error('Invalid active employment');
         }
-        state.book.employment.forEach((e, i) => {
-          checkShape(e, template.book.employment[i]);
-          if (e.actorId !== template.book.employment[i].actorId || e.businessId !== b.id || e.leftAt !== null ||
-              e.hiredAt !== b.openedAt || Object.entries(template.book.employment[i].job).some(([k, v]) =>
-                e.job[k as keyof typeof e.job] !== v)) throw Error('Invalid employment');
-        });
         generate(state.npcSeed, 0); // Validate the saved uint32 seed before accepting the save.
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
@@ -188,24 +199,27 @@ export function createSession(storage: Storage) {
   };
   const tick = (realSeconds: number): SaveResult | undefined => {
     const days = advanceClock(state.world.clock, realSeconds);
-    const target = state.world.clock.totalMinutes, { world, book, purses } = state, b = book.businesses[0];
+    const target = state.world.clock.totalMinutes, { world, book, purses } = state;
     for (let minute = state.economyMinute + 1; minute <= Math.floor(target); minute++) {
       world.clock.totalMinutes = minute;
       const now = gameTime(world.clock);
       const payWages = () => {
         for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute) {
           shift.employerId = personalEmployer[shift.employerId] ?? shift.employerId;
-          if (book.employment.some(e => e.actorId === shift.actorId && e.job.id === shift.jobId))
-            payCompletedShift(book, world.people, world.ledger, b.id, shift, now);
+          const employment = book.employment.find(e => e.actorId === shift.actorId && e.job.id === shift.jobId &&
+            e.job.employerId === shift.employerId && e.hiredAt <= shift.startedAt && (e.leftAt === null || shift.startedAt < e.leftAt));
+          if (employment) payCompletedShift(book, world.people, world.ledger, employment.businessId, shift, now);
           else if (personAccount(world.people, world.ledger, shift.employerId) && personAccount(world.people, world.ledger, shift.actorId))
             finishWork(state.work, world.ledger, shift.id, now);
         }
       };
       payWages();
       if (minute % 60 === 0) {
-        for (const npc of npcs) if (whereIs(npc, now) === b.placeId) {
-          const employment = book.employment.find(e => e.actorId === npc.id && e.leftAt === null);
-          if (employment && !state.work.shifts.some(s => s.actorId === npc.id &&
+        for (const b of book.businesses) for (const npc of npcs) if (
+          b.closedAt === null && b.openedAt <= minute && whereIs(npc, now) === b.placeId) {
+          const employment = book.employment.find(e => e.businessId === b.id && e.actorId === npc.id && e.leftAt === null);
+          if (employment && now.hour * 60 >= employment.job.fromMinute &&
+              now.hour * 60 + employment.job.durationMinutes <= employment.job.toMinute && !state.work.shifts.some(s => s.actorId === npc.id &&
               (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
             startEmployeeShift(book, state.work, npc.id, b.placeId, now);
           if (npc.id === b.ownerId) continue;
@@ -221,7 +235,7 @@ export function createSession(storage: Storage) {
         payWages();
       }
       if (minute % 1440 === 0) {
-        recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
+        for (const b of book.businesses) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         advanceDay(state.market); state.settledDay = now.day - 1;
       }
       expireVisits(state.store, now);
