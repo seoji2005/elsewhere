@@ -57,14 +57,37 @@
   },
   "shino": {
     "directory": "/home/dev/asset-packs/vroid-cc0/sendagaya_shino",
-    "files": ["Sendagaya Shino.vrm"],
-    "maxTexture": 1024
-  },
-  "avatar": {
-    "directory": "/home/dev/asset-packs/vroid-cc0/avatarsample_f",
     "files": [
-      "AvatarSample_F.vrm"
+      "Sendagaya Shino.vrm"
     ],
-    "maxTexture": 1024
+    "maxTexture": 512
+  },
+  "shibu": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/avatarsample_d_0",
+    "files": [
+      "AvatarSample_D.vrm"
+    ],
+    "maxTexture": 512
+  },
+  "basemale": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/base_male",
+    "files": [
+      "Base_Male.vrm"
+    ],
+    "maxTexture": 512
+  },
+  "hoodie": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/hairsample_male",
+    "files": [
+      "HairSample_Male.vrm"
+    ],
+    "maxTexture": 512
+  },
+  "fumiriya": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/sakurada_fumiriya",
+    "files": [
+      "Sakurada Fumiriya.vrm"
+    ],
+    "maxTexture": 512
   }
 }

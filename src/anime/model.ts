@@ -3,10 +3,14 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
-import avatar from '../assets/avatar.vrm?url';
 import shino from '../assets/shino.vrm?url';
+import shibu from '../assets/shibu.vrm?url';
+import basemale from '../assets/basemale.vrm?url';
+import hoodie from '../assets/hoodie.vrm?url';
+import fumiriya from '../assets/fumiriya.vrm?url';
 import { dress, type Outfit } from './wardrobe';
 
+const urls = { shino, shibu, basemale, hoodie, fumiriya };
 const originals = new Map<string, Promise<GLTF>>(), geometry = new Map<string, T.BufferGeometry>();
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).register(parser => {
   const plugin = new VRMLoaderPlugin(parser);
@@ -15,9 +19,30 @@ const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).register(parse
   return plugin;
 });
 
+// tools/assets.mjs stores positions as int16 over +-2 m, normals int8, UVs and weights uint16 (morph deltas at half
+// scale): expand them to floats once per template, before three-vrm rebuilds the geometry.
+const floats = new Map<T.BufferAttribute, T.BufferAttribute>();
+function inflate(attribute: T.BufferAttribute, scale: number) {
+  if (!attribute.normalized) return attribute;
+  if (!floats.has(attribute)) {
+    const { count, itemSize } = attribute, array = new Float32Array(count * itemSize);
+    for (let i = 0; i < array.length; i++) array[i] = attribute.getComponent(Math.floor(i / itemSize), i % itemSize) * scale;
+    floats.set(attribute, new T.BufferAttribute(array, itemSize));
+  }
+  return floats.get(attribute)!;
+}
+
 export async function cloneModel(outfit: Outfit): Promise<VRM> {
-  const url = outfit.source === 'avatar' ? avatar : shino;
+  const url = urls[outfit.source];
   if (!originals.has(url)) originals.set(url, loader.loadAsync(url).then(gltf => {
+    gltf.scene.traverse(object => {
+      if (!(object instanceof T.Mesh)) return;
+      const shape: T.BufferGeometry = object.geometry;
+      for (const [name, attribute] of Object.entries(shape.attributes))
+        shape.setAttribute(name, inflate(attribute as T.BufferAttribute, name === 'position' ? 2 : 1));
+      for (const [name, list] of Object.entries(shape.morphAttributes))
+        shape.morphAttributes[name as 'position'] = list.map(attribute => inflate(attribute as T.BufferAttribute, 2));
+    });
     VRMUtils.removeUnnecessaryVertices(gltf.scene);
     VRMUtils.combineSkeletons(gltf.scene);
     return gltf;

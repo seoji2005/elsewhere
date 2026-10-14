@@ -32,6 +32,28 @@ async function shrinkVrm(file, output, maxSize) {
     triangles.add(first.indices);
     return first;
   });
+  // Keep only the expressions the game plays (blink, wink, smile, talk): each dropped morph target is ~6 KiB.
+  const master = json.extensions.VRM.blendShapeMaster, wanted = new Map();
+  master.blendShapeGroups = master.blendShapeGroups.filter(group => ['neutral', 'blink', 'blink_l', 'blink_r', 'joy', 'a'].includes(group.presetName));
+  for (const { binds } of master.blendShapeGroups) for (const bind of binds) (wanted.get(bind.mesh) ?? wanted.set(bind.mesh, new Set()).get(bind.mesh)).add(bind.index);
+  json.meshes.forEach((mesh, m) => {
+    const list = [...wanted.get(m) ?? []].sort((a, b) => a - b);
+    for (const primitive of mesh.primitives) if (primitive.targets) primitive.targets = list.map(i => primitive.targets[i]);
+    for (const { binds } of master.blendShapeGroups) for (const bind of binds) if (bind.mesh === m) bind.index = list.indexOf(bind.index);
+    if (mesh.weights) mesh.weights = list.map(i => mesh.weights[i]);
+    if (mesh.extras?.targetNames) mesh.extras.targetNames = list.map(i => mesh.extras.targetNames[i]);
+  });
+  // Quantize (KHR_mesh_quantization; model.ts expands them back to floats): positions int16 over +-2 m, normals int8,
+  // UVs and skin weights uint16. Morph deltas use half the scale so +-2 fits. Unreferenced accessors are emptied.
+  const roles = new Map(json.skins.map(skin => [skin.inverseBindMatrices, 'IBM']));
+  for (const { primitives } of json.meshes) for (const p of primitives) {
+    roles.set(p.indices, 'INDICES');
+    for (const [name, i] of Object.entries(p.attributes)) roles.set(i, name);
+    for (const target of p.targets ?? []) for (const [name, i] of Object.entries(target)) roles.set(i, 'TARGET_' + name);
+  }
+  const quant = { POSITION: [Int16Array, 5122, 32767 / 2, 8], TARGET_POSITION: [Int16Array, 5122, 32767 / 2, 8],
+    NORMAL: [Int8Array, 5120, 127, 4], TARGET_NORMAL: [Int8Array, 5120, 127 / 2, 4],
+    TEXCOORD_0: [Uint16Array, 5123, 65535, 4], WEIGHTS_0: [Uint16Array, 5123, 65535, 8] };
   const chunks = [], fallback = [], size = list => list.reduce((sum, chunk) => sum + chunk.length, 0), used = [];
   const append = (list, bytes) => { const at = size(list); list.push(bytes, new Uint8Array((4 - bytes.length % 4) % 4)); return at; };
   for (const image of json.images) {
@@ -41,17 +63,30 @@ async function shrinkVrm(file, output, maxSize) {
     image.mimeType = 'image/webp';
   }
   for (const [i, accessor] of json.accessors.entries()) {
-    const bytes = data(accessor.bufferView).subarray(accessor.byteOffset ?? 0), { count } = accessor;
+    if (!roles.has(i)) { accessor.count = 1; for (const key of ['bufferView', 'byteOffset', 'min', 'max']) delete accessor[key]; continue; }
+    let bytes = data(accessor.bufferView).subarray(accessor.byteOffset ?? 0);
+    const { count } = accessor, n = { VEC2: 2, VEC3: 3, VEC4: 4 }[accessor.type], q = quant[roles.get(i)];
+    if (q && accessor.componentType === 5126) {
+      const [Type, componentType, scale, byteStride] = q, floats = new Float32Array(bytes.buffer, bytes.byteOffset, count * n);
+      const limit = Type === Int8Array ? 127 : Type === Int16Array ? 32767 : 65535, per = byteStride / Type.BYTES_PER_ELEMENT;
+      const out = new Type(count * per);
+      for (let v = 0; v < count; v++) for (let c = 0; c < n; c++) // VRoid normals are not exactly unit length: clamp
+        out[v * per + c] = Math.max(Type === Uint16Array ? 0 : -limit, Math.min(limit, Math.round(floats[v * n + c] * scale)));
+      bytes = new Uint8Array(out.buffer);
+      Object.assign(accessor, { componentType, normalized: true });
+      for (const key of ['min', 'max']) if (accessor[key]) accessor[key] = accessor[key].map(x => Math.round(x * scale));
+    }
     const stride = bytes.length / count, mode = triangles.has(i) ? 'TRIANGLES' : 'ATTRIBUTES';
     const packed = MeshoptEncoder.encodeGltfBuffer(bytes, count, stride, mode);
     accessor.bufferView = used.push({ buffer: 1, byteOffset: append(fallback, bytes), byteLength: bytes.length,
+      ...mode === 'ATTRIBUTES' && { byteStride: stride }, // padded int8/int16 vertex layouts need the stride here too
       extensions: { EXT_meshopt_compression: { buffer: 0, byteOffset: append(chunks, packed), byteLength: packed.length,
         byteStride: stride, count, mode } } }) - 1;
     delete accessor.byteOffset;
   }
   json.bufferViews = used;
   json.buffers = [{ byteLength: size(chunks) }, { byteLength: size(fallback), extensions: { EXT_meshopt_compression: { fallback: true } } }];
-  for (const key of ['extensionsUsed', 'extensionsRequired']) json[key] = [...(json[key] ?? []), 'EXT_meshopt_compression'];
+  for (const key of ['extensionsUsed', 'extensionsRequired']) json[key] = [...(json[key] ?? []), 'EXT_meshopt_compression', 'KHR_mesh_quantization'];
   const text = Buffer.from(JSON.stringify(json)), pad = Buffer.alloc((4 - text.length % 4) % 4, ' '), body = Buffer.concat(chunks);
   await writeFile(output, Buffer.concat([new Uint8Array(new Uint32Array([0x46546c67, 2, 28 + text.length + pad.length + body.length,
     text.length + pad.length, 0x4e4f534a]).buffer), text, pad, new Uint8Array(new Uint32Array([body.length, 0x004e4942]).buffer), body]));

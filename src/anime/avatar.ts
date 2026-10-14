@@ -39,16 +39,44 @@ function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: numbe
   return new T.AnimationClip(clip.name, clip.duration, tracks);
 }
 
+// SD proportions on the raw bones (R012), per ?sd= level: [body, head, limb length, limb girth, hands and feet].
+// VRoid rest bones carry no rotation (arms run along X, legs along Y), so limbs shrink along the bone and thicken
+// across it; hands and feet are counter-scaled to stay uniform. Collider and hit radii are world units, so they
+// follow their bone's world scale; the model is lowered by what the shorter legs lifted the soles.
+const SD = [[1, 1, 1, 1, 1], [0.8, 1.8, 0.78, 1.22, 1.15], [0.7, 2.1, 0.72, 1.35, 1.2]];
+function proportion(vrm: VRM, sd: number) {
+  const [body, head, length, girth, ends] = SD[sd], v = new T.Vector3();
+  const raw = (name: VRMHumanBoneName) => vrm.humanoid.getRawBoneNode(name)!;
+  vrm.scene.updateMatrixWorld(true);
+  const ankle = raw('leftFoot').getWorldPosition(v).y;
+  raw('hips').scale.setScalar(body);
+  raw('head').scale.setScalar(head);
+  for (const side of ['left', 'right'] as const) {
+    raw(`${side}UpperArm`).scale.set(length, girth, girth);
+    raw(`${side}Hand`).scale.set(ends / length, ends / girth, ends / girth);
+    raw(`${side}UpperLeg`).scale.set(girth, length, girth);
+    raw(`${side}Foot`).scale.set(ends / girth, ends / length, ends / girth);
+  }
+  vrm.scene.updateMatrixWorld(true);
+  vrm.scene.position.y -= raw('leftFoot').getWorldPosition(v).y - ankle * body * ends;
+  const springs = vrm.springBoneManager;
+  for (const group of springs?.colliderGroups ?? []) for (const collider of group.colliders) {
+    const shape = collider.shape as { radius?: number };
+    if (shape.radius !== undefined) shape.radius *= collider.getWorldScale(v).x;
+  }
+  for (const joint of springs?.joints ?? []) joint.settings.hitRadius *= joint.bone.getWorldScale(v).x;
+  vrm.scene.updateMatrixWorld(true);
+  springs?.setInitState();
+  return body;
+}
+
 // Anime hero: VRM (MToon toon shading + outlines, spring-bone hair and skirt), retargeted UAL idle / walk / jog,
 // automatic blinks, an occasional smile and eyes that follow the camera.
 let motions: ReturnType<typeof loadAssets> | undefined;
 export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outfits[0], phase = 0) {
   const [vrm, motion] = await Promise.all([cloneModel(outfit), motions ??= loadAssets('people')]);
-  const bodyScale = sd === 2 ? 0.64 : sd === 1 ? 0.82 : 1;
   // Scale the raw rig, including clothing/spring roots; normalized animation only transfers rotations and hips position.
-  vrm.humanoid.getRawBoneNode('hips')!.scale.setScalar(bodyScale);
-  vrm.humanoid.getRawBoneNode('head')!.scale.setScalar(sd === 2 ? 2.9 : sd === 1 ? 1.8 : 1);
-  vrm.scene.updateMatrixWorld(true);
+  const bodyScale = proportion(vrm, sd);
   const rig = motion.scene.getObjectByName('UAL1_Standard')!;
   motion.scene.updateMatrixWorld(true);
   let pelvis = rig;

@@ -55,11 +55,16 @@ if (day) scene.traverse(object => { if (object.name === 'glow') object.visible =
 // Added after the look pass so look A/B never retints the player.
 character.group.position.set(-7, 0, -6);
 scene.add(character.group);
+const ui = hud();
+const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
+// ?cast=1: the zebra crossing by the corner is the only open ground (sidewalks are 1.3 m deep). A half ring behind
+// the player as seen from the start camera, everyone turned to the camera, so no bollard, planter or back covers a face.
+const stage = new T.Vector3(-6.3, 0, -2.2), yaw = controls.state.yaw;
+if (cast.length) { character.group.position.copy(stage); character.group.rotation.y = yaw; }
 cast.forEach((person, i) => {
-  const across = [-2.5, -1.25, 1.25, 2.5, 3.75][i];
-  person.group.position.set(-7 + across * Math.SQRT1_2 - 0.5, 0, -6 - across * Math.SQRT1_2 - 0.5);
-  person.group.position.y = Math.abs(person.group.position.x) > 5 && Math.abs(person.group.position.z) > 5 ? 0.11 : 0;
-  person.group.rotation.y = Math.PI / 4;
+  const angle = Math.PI * (0.2 + 0.6 * i / (cast.length - 1)), back = -2 * Math.sin(angle), side = 2 * Math.cos(angle);
+  person.group.position.set(stage.x + back * Math.sin(yaw) + side * Math.cos(yaw), 0, stage.z + back * Math.cos(yaw) - side * Math.sin(yaw));
+  person.group.rotation.y = Math.atan2(stage.x + 3 * Math.sin(yaw) - person.group.position.x, stage.z + 3 * Math.cos(yaw) - person.group.position.z);
   scene.add(person.group);
 });
 // A static shadow map cannot follow the player: a soft contact blob grounds them instead.
@@ -79,8 +84,6 @@ if (blob) cast.forEach(person => {
   contact.position.copy(person.group.position).setY(person.group.position.y + 0.02);
   scene.add(contact);
 });
-const ui = hud();
-const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
 controls.state.dist = Number(query.get('dist')) || controls.state.dist;
 controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
