@@ -1,4 +1,6 @@
 import type { Npc, Trait } from '../data/npcs';
+import type { Archetype } from '../data/archetypes';
+import type { BondEffect } from './bonds';
 import type { GameTime } from './clock';
 import { minuteOf } from './memory';
 import { whereIs } from './npc';
@@ -10,7 +12,7 @@ export type Appearance = Readonly<Record<string, string | number>>;
 export interface Appointment {
   id: string; actorId: string; introducerId: string; npcId: string;
   placeId: string; time: GameTime;
-  impression: { name: string; appearance: Appearance; keywords: readonly Trait[] };
+  impression: { name: string; appearance: Appearance; keywords: readonly Trait[]; note: string };
   playerInterest: number; npcInterest: number;
   status: 'offered' | 'scheduled' | 'declined' | 'rejected' | 'no-show' | 'met';
   noShowBy: string[];
@@ -47,9 +49,15 @@ export function requestMatch(state: MatchmakingState, encounters: EncounterState
   const { npc, playerInterest, npcInterest } = candidate;
   const appearance = appearances[npc.id];
   if (!appearance || !Object.keys(appearance).length) throw Error('Missing first impression appearance');
+  const introducer = npcs.find(entry => entry.id === introducerId)! as Npc & { speech?: Archetype['speech'] };
+  const formal = introducer.speech?.politeEndings.some(ending => ['입니다', '합니다'].includes(ending))
+    ?? introducer.traits.includes('practical');
+  const note = formal ? `${npc.name} 님은 ${npc.likes[0] ?? '대화'}에 관심이 있는 분입니다.`
+    : introducer.traits.includes('playful') ? `${npc.name} 님과 이야기하면 재미있을 거예요!`
+    : `${npc.name} 님과 천천히 이야기 나눠 보시면 좋겠어요.`;
   const appointment: Appointment = { id: request.id, actorId: player.id, introducerId, npcId: npc.id,
     placeId: slot.placeId, time: { ...slot.time }, playerInterest, npcInterest,
-    impression: { name: npc.name, appearance: { ...appearance }, keywords: [...npc.traits] },
+    impression: { name: npc.name, appearance: { ...appearance }, keywords: [...npc.traits], note },
     status: 'offered', noShowBy: [] };
   state.appointments.push(appointment);
   return appointment;
@@ -86,4 +94,13 @@ export function resolveMatch(appointment: Appointment, encounters: EncounterStat
   if (missing.length) return appointment.status;
   recordMeeting(encounters, appointment.actorId, npc, now);
   return appointment.status = 'met';
+}
+
+// Apply with a stable event ID (e.g. match-no-show:<appointment.id>) to avoid duplicate losses.
+export function noShowEffects(appointment: Appointment): BondEffect[] {
+  if (appointment.status !== 'no-show' || !appointment.noShowBy.includes(appointment.actorId)) return [];
+  return [
+    { fromId: appointment.introducerId, toId: appointment.actorId, delta: { trust: -5 } },
+    { fromId: appointment.npcId, toId: appointment.actorId, delta: { trust: -10 } },
+  ];
 }
