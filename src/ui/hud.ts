@@ -7,7 +7,7 @@ import type { Door } from '../data/doors';
 import type { Npc } from '../data/npcs';
 import type { GeneratedNpc } from '../sim/npcgen';
 import { gameTime, type GameTime } from '../sim/clock';
-import { applyBondEvent, reactionEffect, readBond } from '../sim/bonds';
+import { applyBondEvent, reactionEffect, readBond, stageOf, friendly, canStartDating } from '../sim/bonds';
 import { relationshipStage, type Interaction } from '../sim/relationship';
 import { useItem } from '../sim/shop';
 import { respondToMatch } from '../sim/matchmaking';
@@ -49,7 +49,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   let pending = false;
   const pointers = new Set<number>();
   let updates: (() => void)[] = [];
-  const live = (element: HTMLElement, text: () => string) => {
+  const live = (element: Node, text: () => string) => {
     const update = () => { const next = text(); if (element.textContent !== next) element.textContent = next; };
     updates.push(update);
     update();
@@ -72,6 +72,17 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const now = () => gameTime(state.world.clock);
   const uid = (kind: string) => `${kind}:player:${Math.floor(state.world.clock.totalMinutes)}:${Math.random().toString(36).slice(2, 8)}`;
   const value = (npc: Npc) => state.world.relationships.player?.[npc.id] ?? 0;
+  const incoming = (npc: Npc) => readBond(state.bonds, npc.id, 'player');
+  const stage = (npc: Npc) => {
+    const name = state.relationMode === 'bonds' ? stageOf(state.bonds, npc.id, 'player', state.dialogue)
+      : relationshipStage(value(npc));
+    return name === '연인 첫 단계' ? '연인' : name;
+  };
+  const scores = (npc: Npc) => `호감 ${Math.round(incoming(npc).affection)} · 신뢰 ${Math.round(incoming(npc).trust)}`;
+  const feeling = (npc: Npc) => {
+    const romance = readBond(state.bonds, 'player', npc.id).romance;
+    return romance >= 60 ? 'love' : romance >= 40 ? 'crush' : 'friend';
+  };
   const owned = () => items.filter(item => (state.shop.residents.player?.inventory[item.id] ?? 0) > 0);
   // Every action re-renders; a returned string is toasted, a thrown sim error becomes a short Korean reason.
   const act = (action: () => string | void) => {
@@ -143,8 +154,33 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   function person(npc: Npc) {
     const head = make('hud-head', body);
     button(head, '‹ 목록', () => { selected = ''; });
-    live(make('hud-name', head), () => `${npc.name} · ${relationshipStage(value(npc))} ${value(npc)}`);
+    live(make('hud-name', head), () => `${npc.name} · ${stage(npc)}`);
+    live(make('hud-sub hud-bond', body), () => scores(npc));
     make('hud-say', body, 'div', said);
+    const feelings = make('hud-chips', body);
+    live(make('hud-sub', feelings, 'span'), () => `내 마음 · ${ { friend: '친구', crush: '호감', love: '사랑' }[feeling(npc)]}`);
+    for (const [id, label] of [['friend', '친구'], ['crush', '호감'], ['love', '사랑']] as const) {
+      const choice = button(feelings, label, () => session.setFeeling(npc.id, id) ? undefined : '지금은 마음을 바꿀 수 없어요');
+      const update = () => {
+        choice.classList.toggle('on', feeling(npc) === id);
+        choice.setAttribute('aria-pressed', String(feeling(npc) === id));
+      };
+      updates.push(update);
+      update();
+    }
+    const expression = make('hud-chips', body);
+    const expressed = () => state.bonds.applied.includes(`feelings:${JSON.stringify([npc.id, now().day])}`);
+    button(expression, '마음 표현', () => {
+      const welcomed = incoming(npc).affection >= 40 && incoming(npc).comfort >= 20;
+      return session.expressFeelings(npc.id) ? welcomed ? '반가워함' : '부담스러워함' : '오늘은 이미 마음을 표현했어요';
+    }, expressed);
+    live(make('hud-sub', expression, 'span'), () => expressed() ? '오늘 표현했어요' : '하루 1회');
+    if (state.player.placeId === 'nest') button(expression, '차 마시자', () => {
+      if (state.relationMode !== 'bonds') return '지금은 차를 초대할 수 없어요';
+      if ((state.shop.residents.player?.atmosphere ?? 0) < 5) return '방 분위기가 5 이상이어야 해요';
+      if (!friendly(incoming(npc))) return '상대와 먼저 친구가 되어야 해요';
+      return session.inviteHomeTea(uid('home-tea'), npc.id) ? '함께 차를 마셨어요' : '상대가 지금 집에 없어요';
+    });
     const topics = make('hud-chips', body);
     make('hud-sub', topics, 'span', '이야기');
     npc.likes.forEach((topic, index) => button(topics, topic, speak(npc, () => {
@@ -160,9 +196,12 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       return line;
     }));
     const more = make('hud-chips', body);
-    button(more, '소개팅 부탁 (30+)', () => { said = match(npc); }, () => value(npc) < 30);
+    button(more, '소개팅 부탁 (30+)', () => { said = match(npc); },
+      () => state.relationMode === 'bonds' ? !friendly(incoming(npc)) : value(npc) < 30);
     button(more, '고백하기 (60+)', speak(npc, () => session.confess(uid('confess'), npc.id, { playerWantsDating: true,
-      npcWantsDating: readBond(state.bonds, npc.id, 'player').affection >= 30 }).line), () => value(npc) < 60);
+      npcWantsDating: incoming(npc).affection >= 30 }).line), () => state.relationMode === 'bonds'
+      ? !canStartDating(readBond(state.bonds, 'player', npc.id), incoming(npc),
+        { playerWantsDating: true, npcWantsDating: incoming(npc).affection >= 30 }) : value(npc) < 60);
   }
   function people() {
     const date = state.matchmaking.appointments.find(a => a.status === 'scheduled');
@@ -173,7 +212,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     title(`${placeName(state.player.placeId)}에 있는 사람`);
     if (!here.length) note('지금은 아무도 없어요. 다른 장소로 가 보세요.');
     for (const n of here.sort((a, b) => Number('speech' in a) - Number('speech' in b) || value(b) - value(a))) {
-      const line = row(n.name, () => `${n.job} · ${relationshipStage(value(n))} ${value(n)}`);
+      const line = row(`${n.name} · ${stage(n)}`, () => `${n.job} · ${scores(n)}`);
+      live(line.querySelector('.hud-label')!.firstChild!, () => `${n.name} · ${stage(n)}`);
       line.classList.add('tap');
       line.onclick = () => act(() => { selected = n.id; speak(n, () => session.buildDialogue(n.id).line)(); });
     }

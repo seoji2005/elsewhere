@@ -48,8 +48,17 @@ try {
   const speech = panel.locator('.hud-say'), relationship = panel.locator('.hud-name');
   const firstLine = (await speech.innerText()).trim();
   assert.ok(firstLine, '주민을 선택하면 첫 대사가 비어 있지 않아야 함');
-  const beforeRelationship = await relationship.innerText();
-  assert.match(beforeRelationship, /· .+ -?\d+$/, '이름 옆에 관계 단계와 친밀도 숫자가 있어야 함');
+  assert.match(await relationship.innerText(), /· (낯섦|아는 사이|친구|호감|연인)$/, '이름 옆에 상대의 관계 단계가 있어야 함');
+  const bondScores = panel.locator('.hud-bond');
+  const beforeRelationship = await bondScores.innerText();
+  assert.match(beforeRelationship, /^호감 -?\d+ · 신뢰 -?\d+$/, '호감과 신뢰 숫자가 작게 표시되어야 함');
+
+  step = '내 마음 선택: 호감 표시와 선택 상태 변경';
+  const feelings = panel.locator('.hud-chips').filter({ hasText: '내 마음' });
+  await feelings.getByRole('button', { name: '호감', exact: true }).tap();
+  assert.match(await feelings.innerText(), /내 마음 · 호감/, '선택한 내 마음이 호감으로 표시되어야 함');
+  assert.equal(await feelings.getByRole('button', { name: '호감', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await feelings.getByRole('button', { name: '친구', exact: true }).getAttribute('aria-pressed'), 'false');
 
   step = '이야기 주제 선택: 대사와 친밀도 표시 변경';
   const topics = panel.locator('.hud-chips').filter({ hasText: '이야기' }).getByRole('button');
@@ -58,8 +67,8 @@ try {
   const nextLine = (await speech.innerText()).trim();
   assert.ok(nextLine, '이야기 뒤에도 대사가 비어 있지 않아야 함');
   assert.notEqual(nextLine, firstLine, '주제를 탭하면 첫 대사에서 응답 대사로 바뀌어야 함');
-  const afterRelationship = await relationship.innerText();
-  assert.match(afterRelationship, /· .+ -?\d+$/, '이야기 뒤에도 친밀도 숫자가 표시되어야 함');
+  const afterRelationship = await bondScores.innerText();
+  assert.match(afterRelationship, /^호감 -?\d+ · 신뢰 -?\d+$/, '이야기 뒤에도 호감과 신뢰 숫자가 표시되어야 함');
   assert.notEqual(afterRelationship, beforeRelationship, '이야기 뒤 친밀도 표시가 바뀌어야 함');
 
   step = '찻방 이동: 일·소비에 잔향 차 판매 표시';
@@ -88,7 +97,7 @@ try {
   assert.equal(await panel.locator('.hud-note').filter({ hasText: '아직 없어요.' }).count(), 1,
     '마지막 물건을 쓰면 가진 물건이 비었다는 안내가 보여야 함');
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');
-  console.log('Play: 결폰 → 주민 대화·친밀도 변경 → 잔향 차 구매 → 사용·활력 증가 PASS');
+  console.log('Play: 결폰 → 내 마음 선택 → 주민 대화·호감 변경 → 잔향 차 구매 → 사용·활력 증가 PASS');
 } catch (error) {
   console.error(`Play social [${step}] FAIL${expired ? ' (전체 60초 초과)' : ''}: ${error.message}`);
   if (errors.length) console.error(errors.join('\n'));
