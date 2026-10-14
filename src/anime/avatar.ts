@@ -18,7 +18,7 @@ for (const [s, side] of [['l', 'left'], ['r', 'right']]) {
 
 // Mirrors three-vrm's Mixamo example (MIT): both rigs rest in a T-pose, so rest-pose world rotations carry each
 // UAL rotation into VRM normalized bone space; the hips track is moved to world space and scaled to the VRM's legs.
-function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: number) {
+function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: number, hipsOffset = 0) {
   const rest = new T.Quaternion(), parent = new T.Quaternion(), q = new T.Quaternion(), v = new T.Vector3();
   const flip = vrm.meta.metaVersion === '0' ? -1 : 1; // VRM 0.x faces -Z: mirror x and z
   const tracks = clip.tracks.flatMap(track => {
@@ -34,7 +34,7 @@ function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: numbe
     if (property !== 'position' || BONES[node.userData.name] !== 'hips') return [];
     for (let i = 0; i < values.length; i += 3) v.fromArray(values, i).applyMatrix4(node.parent.matrixWorld).toArray(values, i);
     return [new T.VectorKeyframeTrack(`${bone.name}.position`, track.times,
-      values.map((x, i) => x * scale * (i % 3 === 1 ? 1 : flip)))];
+      values.map((x, i) => x * scale * (i % 3 === 1 ? 1 : flip) + (i % 3 === 1 ? hipsOffset : 0)))];
   });
   return new T.AnimationClip(clip.name, clip.duration, tracks);
 }
@@ -85,14 +85,35 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   // Scale the raw rig, including clothing/spring roots; normalized animation only transfers rotations and hips position.
   const bodyScale = proportion(vrm, sd);
   const focusHeight = 1.4 * (sd ? height() / originalHeight : 1);
+  // Cache sole corners from the scaled foot geometry; foot/toe bone origins are above the soles.
+  const contacts = sd === 2 ? (['left', 'right'] as const).flatMap(side => {
+    const bone = vrm.humanoid.getRawBoneNode(`${side}Foot`)!, toes = vrm.humanoid.getRawBoneNode(`${side}Toes`), box = new T.Box3();
+    vrm.scene.traverse(object => {
+      if (!(object instanceof T.SkinnedMesh)) return;
+      const indices = object.geometry.getAttribute('skinIndex'), weights = object.geometry.getAttribute('skinWeight');
+      object.skeleton.update();
+      for (let i = 0; i < indices.count; i++) {
+        let weight = 0;
+        for (let j = 0; j < 4; j++) {
+          const joint = object.skeleton.bones[indices.getComponent(i, j)];
+          if (joint === bone || joint === toes) weight += weights.getComponent(i, j);
+        }
+        if (weight > 0.5) box.expandByPoint(bone.worldToLocal(object.getVertexPosition(i, new T.Vector3()).applyMatrix4(object.matrixWorld)));
+      }
+    });
+    return [box.min.x, box.max.x].flatMap(x => [box.min.z, box.max.z].map(z => ({ bone, point: new T.Vector3(x, box.min.y, z) })));
+  }) : [];
   const rig = motion.scene.getObjectByName('UAL1_Standard')!;
   motion.scene.updateMatrixWorld(true);
   let pelvis = rig;
   rig.traverse(object => { if (object.userData.name === 'pelvis') pelvis = object; });
-  const v = new T.Vector3(), scale = bodyScale * vrm.humanoid.getNormalizedBoneNode('hips')!.getWorldPosition(v).y / pelvis.getWorldPosition(v).y;
+  const v = new T.Vector3(), hips = vrm.humanoid.getNormalizedBoneNode('hips')!;
+  // Scene lowering must not shrink the hips track again; preserve its local rest height.
+  const scale = bodyScale * (sd === 2 ? hips.position.y : hips.getWorldPosition(v).y) / pelvis.getWorldPosition(v).y;
+  const hipsOffset = sd === 2 ? hips.position.y * (1 - bodyScale) : 0;
   const mixer = new T.AnimationMixer(vrm.scene);
   const [idle, walk, run] = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop'].map(name =>
-    mixer.clipAction(retarget(motion.animations.find(clip => clip.name === name)!, rig, vrm, scale)).play());
+    mixer.clipAction(retarget(motion.animations.find(clip => clip.name === name)!, rig, vrm, scale, hipsOffset)).play());
   idle.time = phase % idle.getClip().duration;
   if (vrm.lookAt) vrm.lookAt.target = camera;
   const group = new T.Group().add(vrm.scene), face = vrm.expressionManager;
@@ -112,6 +133,10 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
     const smile = T.MathUtils.smoothstep(time, smileAt, smileAt + 0.4) * (1 - T.MathUtils.smoothstep(time, smileAt + 2.2, smileAt + 2.6));
     face?.setValue('happy', 0.65 * smile);
     face?.setValue('blink', Math.max(0, 1 - Math.abs(time - blinkAt - 0.08) / 0.08) * (1 - smile));
+    if (sd === 2) {
+      vrm.humanoid.update(); group.updateMatrixWorld(true);
+      vrm.scene.position.y += group.getWorldPosition(v).y - Math.min(...contacts.map(({ bone, point }) => bone.localToWorld(v.copy(point)).y));
+    }
     if (first) { vrm.humanoid.update(); group.updateMatrixWorld(true); vrm.springBoneManager?.reset(); }
     first = false;
     vrm.update(dt);
