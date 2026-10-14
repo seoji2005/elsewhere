@@ -12,11 +12,11 @@ import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
 import { createWorkState, finishWork, startWork as beginWork } from '../sim/work';
 import { createStore, expireVisits, restock, visitStore } from '../sim/store';
-import { createShopState, useItem, giveGift } from '../sim/shop';
+import { createShopState, useItem, giveGift, inviteHomeTea } from '../sim/shop';
 import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
 import { createMatchmakingState, resolveMatch, requestMatch, type MatchRequest } from '../sim/matchmaking';
-import { minuteOf } from '../sim/memory';
+import { minuteOf, createMemoryState, rememberSharedEvent, type SharedEvent } from '../sim/memory';
 import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly } from '../sim/bonds';
 import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
 import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '../sim/ripple';
@@ -314,7 +314,36 @@ export function createSession(storage: Storage, npcSeed?: number) {
     const event = { id, actorId: 'player', targetId: npcId, time, placeId: state.player.placeId, topic, kind };
     for (const n of residents) deliverRipple(state.ripple, state.bonds, world, state.dialogue, event, n.id, time);
   };
+  const completeShared = (event: SharedEvent, delta: { trust: number; respect?: number; comfort: number }) => {
+    if (state.relationMode !== 'bonds') return false;
+    const participants = event.participants.filter(id => id !== 'player');
+    if (!applyBondEvent(state.bonds, event.id, event.time, participants.map(fromId =>
+      ({ fromId, toId: 'player', delta, met: true })))) return false;
+    for (const id of participants) rememberSharedEvent(state.dialogue.memories[id] ??= createMemoryState(id), event);
+    return true;
+  };
   const social = {
+    setFeeling(npcId: string, feeling: 'friend' | 'crush' | 'love', id = `feeling:${JSON.stringify([npcId, state.bonds.applied.length])}`) {
+      context(npcId);
+      if (state.relationMode !== 'bonds' || state.bonds.applied.includes(id)) return false;
+      if (!id || !['friend', 'crush', 'love'].includes(feeling)) throw Error('Invalid feeling');
+      const love = feeling === 'love', previous = readBond(state.bonds, 'player', npcId);
+      state.bonds.edges[edgeKey('player', npcId)] = { ...previous, affection: love ? 40 : 30,
+        trust: love ? 25 : 15, respect: 0, comfort: love ? 20 : 10, romance: love ? 60 : feeling === 'crush' ? 40 : 0,
+        met: previous.met || readBond(state.bonds, npcId, 'player').met };
+      state.bonds.applied.push(id); return true;
+    },
+    expressFeelings(npcId: string) {
+      const { time } = context(npcId), bond = readBond(state.bonds, npcId, 'player');
+      return state.relationMode === 'bonds' && applyBondEvent(state.bonds, `feelings:${JSON.stringify([npcId, time.day])}`, time,
+        [{ fromId: npcId, toId: 'player', delta: bond.affection >= 40 && bond.comfort >= 20 ? { romance: 6 } : { comfort: -3 } }]);
+    },
+    inviteHomeTea(id: string, npcId: string) {
+      const { npc, time } = context(npcId);
+      if (state.relationMode !== 'bonds' || state.player.placeId !== 'nest' || whereIs(npc, time) !== 'nest') return false;
+      const event = inviteHomeTea(state.shop, state.world, 'player', npc, id, time, state.bonds);
+      return !!event && completeShared({ ...event, status: 'completed' }, { comfort: 3, trust: 2 });
+    },
     buildDialogue(npcId: string) {
       const result = buildDialogue(state.dialogue, context(npcId));
       if (state.relationMode === 'bonds') result.stage = stageOf(state.bonds, npcId, 'player', state.dialogue);
@@ -371,7 +400,8 @@ export function createSession(storage: Storage, npcSeed?: number) {
         { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) }) === 'met') {
         applyBondEvent(state.bonds, `match-met:${appointment.id}`, now, [
           { fromId: appointment.actorId, toId: npc.id, delta: {}, met: true },
-          { fromId: npc.id, toId: appointment.actorId, delta: {}, met: true },
+          { fromId: npc.id, toId: appointment.actorId, delta: state.relationMode === 'bonds' ? { trust: 3 } : {}, met: true },
+          ...(state.relationMode === 'bonds' ? [{ fromId: appointment.introducerId, toId: appointment.actorId, delta: { trust: 3 } }] : []),
         ]);
       }
     }
@@ -391,6 +421,15 @@ export function createSession(storage: Storage, npcSeed?: number) {
       const payWages = () => {
         for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute) {
           shift.employerId = personalEmployer[shift.employerId] ?? shift.employerId;
+          if (state.relationMode === 'bonds' && shift.actorId === 'player' && shift.endsAt === minute) {
+            const job = jobs.find(j => j.id === shift.jobId)!;
+            const coworkers = state.work.shifts.filter(s => s.actorId !== 'player' && s.startedAt < shift.endsAt && s.endsAt > shift.startedAt
+              && (jobs.find(j => j.id === s.jobId) ?? book.employment.find(e => e.actorId === s.actorId && e.job.id === s.jobId)?.job)?.placeId === job.placeId);
+            const participants = [...new Set(['player', personalEmployer[shift.employerId] ?? shift.employerId, ...coworkers.map(s => s.actorId)])];
+            completeShared({ id: `shared:${shift.id}`, actorId: 'player', participants, kind: 'shared-work', time: now,
+              placeId: job.placeId, placeName: world.places[job.placeId].name, activityName: job.name, status: 'completed' },
+            { trust: 3, respect: 2, comfort: 2 });
+          }
           const employment = book.employment.find(e => e.actorId === shift.actorId && e.job.id === shift.jobId &&
             e.job.employerId === shift.employerId && e.hiredAt <= shift.startedAt && (e.leftAt === null || shift.startedAt < e.leftAt));
           if (employment) payCompletedShift(book, world.people, world.ledger, employment.businessId, shift, now);
