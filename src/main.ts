@@ -51,7 +51,6 @@ const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAv
 applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6);
 if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
-character.group.position.set(-7, 0, -6);
 scene.add(character.group);
 // A static shadow map cannot follow the player: a soft contact blob grounds them instead.
 const blob = shadow === 'dynamic' ? undefined : new T.Mesh(new T.PlaneGeometry(1.1, 1.1).rotateX(-Math.PI / 2),
@@ -67,9 +66,28 @@ if (blob) {
 }
 // The life simulation: clock, wallets, residents, shops and market; autosaves every game hour and when hidden.
 const session = createSession(localStorageAdapter());
-const ui = hud(session, [...npcs, ...generate(session.state.npcSeed, 50)]);
+const player = session.state.player;
+character.group.position.set(player.x, 0, player.z);
+character.group.rotation.y = player.direction;
+let origin = doors.find(d => d.placeId === player.placeId)?.position ?? { x: player.x, z: player.z };
+function syncPosition() {
+  const at = character.group.position;
+  Object.assign(player, { x: at.x, z: at.z, direction: character.group.rotation.y });
+  if (player.placeId !== 'street' && Math.hypot(at.x - origin.x, at.z - origin.z) > 6) {
+    player.placeId = 'street';
+    session.state.world.people.player.placeId = 'street';
+  }
+}
+const ui = hud(session, [...npcs, ...generate(session.state.npcSeed, 50)], {
+  sync: syncPosition,
+  move(placeId) {
+    const pose = doors.find(d => d.placeId === placeId)?.position;
+    if (pose) { character.group.position.set(pose.x, 0, pose.z); character.group.rotation.y = pose.yaw; }
+    origin = { x: character.group.position.x, z: character.group.position.z };
+  },
+});
 if (!session.loadResult.ok) ui.say('저장이 손상돼 새로 시작했어요');
-addEventListener('visibilitychange', () => { if (document.hidden) session.saveNow(); });
+addEventListener('visibilitychange', () => { if (document.hidden) { syncPosition(); session.saveNow(); } });
 const [phoneTab, phonePlace] = (query.get('phone') ?? '').split(',');
 if (phoneTab) ui.open(phoneTab, phonePlace);
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
@@ -158,7 +176,7 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
-let previous = performance.now(), status = { speed: 0, near: false };
+let previous = performance.now(), positionElapsed = 0, status = { speed: 0, near: false };
 renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
@@ -166,6 +184,8 @@ renderer.setAnimationLoop(now => {
   character.update(status.speed, Math.min(dt, 0.1));
   const at = character.group.position; // only the two hero shops have a sim door; other façades stay closed
   ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
+  positionElapsed += dt;
+  if (positionElapsed >= 0.2) { syncPosition(); positionElapsed = 0; }
   if (session.tick(Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);

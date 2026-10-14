@@ -9,7 +9,7 @@ const errors = [];
 const deadline = setTimeout(() => {
   expired = true;
   void browser?.close();
-}, 60_000);
+}, 120_000); // server SwiftShader: one reload of the 9MB build takes ~8-11s
 try {
   browser = await chromium.launch({ timeout: 15_000,
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -102,6 +102,31 @@ try {
   assert.equal(await owned.count(), 0, '사용 뒤 잔향 차 0개로 가진 물건에서 사라져야 함');
   assert.equal(await panel.locator('.hud-note').filter({ hasText: '아직 없어요.' }).count(), 1,
     '마지막 물건을 쓰면 가진 물건이 비었다는 안내가 보여야 함');
+  step = '기존 예정 약속 모두 표시·소개팅 연타 차단';
+  await page.evaluate(() => {
+    const save = JSON.parse(localStorage.getItem('vworld.session'));
+    save.state.bonds.edges[JSON.stringify(['nuel', 'player'])] = {
+      affection: 40, trust: 25, respect: 0, comfort: 20, romance: 0, met: true,
+    };
+    save.state.matchmaking.appointments = ['첫 약속', '둘째 약속'].map((name, index) => ({
+      id: `review-match-${index}`, actorId: 'player', introducerId: 'nuel', npcId: 'lise', placeId: 'cafe',
+      time: { day: 2, hour: 12 + index, minute: 0 }, impression: { name, appearance: {}, keywords: [], note: '' },
+      playerInterest: 2, npcInterest: 2, status: 'scheduled', noShowBy: [],
+    }));
+    localStorage.setItem('vworld.session', JSON.stringify(save));
+    history.replaceState(null, '', `${location.pathname}?phone=people,nest`);
+    addEventListener('visibilitychange', event => event.stopImmediatePropagation(), true);
+  });
+  await page.reload({ timeout: 45_000 });
+  await page.locator('canvas[data-ready="true"]').waitFor();
+  assert.equal(await panel.locator('.hud-note').filter({ hasText: '약속 ·' }).count(), 2);
+  await residents.filter({ hasText: '누엘' }).tap();
+  assert.match(await relationship.innerText(), /누엘 · 친구/, '친구 조건을 만족해도 기존 약속 때문에 비활성');
+  const match = panel.getByRole('button', { name: '소개팅 부탁 (30+)', exact: true });
+  assert.ok(await match.isDisabled(), '미완료 약속이 있으면 소개팅 부탁 비활성');
+  assert.match(await panel.innerText(), /아직 끝나지 않은 약속이 있어요/);
+  await match.evaluate(button => { for (let i = 0; i < 5; i++) button.click(); });
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('vworld.session')).state.matchmaking.appointments.length), 2);
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');
   console.log('Play: 결폰 → 내 마음 선택 → 주민 대화·호감 변경 → 잔향 차 구매 → 사용·활력 증가 PASS');
 } catch (error) {
