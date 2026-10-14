@@ -1,0 +1,41 @@
+# Screenshot speed benchmark on a GitHub-hosted runner (no GPU). Results are
+# committed to branch cloud-shots-gha because the server has no gh login.
+name: bench-shots
+on:
+  push:
+    branches: [vworld]
+    paths: ['.github/workflows/bench-shots.yml', 'tools/shot.mjs']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1 >/dev/null || true
+      - name: Benchmark
+        run: |
+          mkdir -p bench/gha
+          {
+            echo "# GitHub Actions ubuntu-latest"
+            echo "- nproc: $(nproc), RAM: $(free -m | awk '/Mem/{print $2}')MB, GPU: $(ls /dev/dri 2>/dev/null || echo none)"
+            s=$(date +%s.%N); npm run --silent build:single >/dev/null; e=$(date +%s.%N)
+            echo "- build:single: $(echo "$e - $s" | bc)s"
+            for q in look=b look=b look=b look=a debug=1; do
+              s=$(date +%s.%N); node tools/shot.mjs "$q" >/dev/null 2>&1 && ok=ok || ok=FAIL; e=$(date +%s.%N)
+              echo "- shot $q (swiftshader): $(echo "$e - $s" | bc)s $ok"
+              cp .shots/*.jpg bench/gha/ 2>/dev/null || true
+            done
+          } > bench/gha.md
+          cat bench/gha.md
+      - name: Push results
+        run: |
+          git config user.name bench-bot; git config user.email bench-bot@users.noreply.github.com
+          git checkout -B cloud-shots-gha
+          git add bench && git commit -qm "bench: GitHub Actions screenshot timing" && git push -f origin cloud-shots-gha
