@@ -315,3 +315,26 @@ it('rejects a v5 save whose generated wallet was removed', () => {
   const saved = JSON.parse(storage.getItem(SESSION_KEY)!); delete saved.state.purses[generate(123, 50)[0].id];
   storage.setItem(SESSION_KEY, JSON.stringify(saved)); expect(createSession(storage).loadResult.ok).toBe(false);
 });
+it('connects generated dialogue, gifts, dating, introductions and public notices without changing saved edges', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session, residents = generate(123, 50);
+  session.tick(720); const time = gameTime(state.world.clock), npc = residents.find(n => whereIs(n, time) === 'cafe')!;
+  state.player.placeId = 'cafe'; const observer = residents.find(n => n.id !== npc.id && whereIs(n, time) === 'cafe')!;
+  const opening = session.buildDialogue(npc.id); expect(session.talk('chat', npc.id, opening.choices[0]).line).toBeTruthy();
+  state.shop.residents.player = { inventory: { scarf: 1 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+  expect(session.giveGift('gift', npc.id, 'scarf').line).toBeTruthy();
+  expect(() => session.giveGift('gift', npc.id, 'scarf')).toThrow();
+  expect(state.shop.residents.player.inventory.scarf).toBe(0);
+  state.world.relationships.player[npc.id] = 90;
+  expect(session.confess('dating', npc.id, { playerWantsDating: true, npcWantsDating: true }).accepted).toBe(true);
+  expect(state.ripple.notices.some(n => n.observerId === observer.id && n.eventId === 'gift')).toBe(true);
+  expect(state.ripple.notices.some(n => n.observerId === observer.id && n.kind === 'dating')).toBe(true);
+  expect(session.buildDialogue(observer.id).line).toContain('저도 봤어요');
+  const all = [...npcs, ...residents], slotTime = { ...time, minute: 1 };
+  const offered = session.requestMatch({ id: 'match', player: { id: 'player', traits: npc.traits, likes: npc.likes, dislikes: [], reputation: 0 },
+    introducerId: npc.id, npcs: all, now: time, slot: { placeId: 'cafe', time: slotTime },
+    appearances: Object.fromEntries(residents.map(n => [n.id, n.appearance])) });
+  expect(offered?.npcId).toBeDefined(); expect(readBond(state.bonds, npc.id, observer.id).trust).toBe(20);
+  session.tick(6 * 60); expect(state.ripple.notices.some(n => n.mode === 'rumor')).toBe(true);
+  session.saveNow(); expect(createSession(storage).state).toEqual(state);
+  expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+});

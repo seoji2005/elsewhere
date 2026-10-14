@@ -106,3 +106,18 @@ it('reads a legacy gift once without granting more relationship points', () => {
   expect(buildDialogue(JSON.parse(JSON.stringify(state)), ctx).line).toBe(dialogueTemplates.aro.familiar);
   expect(JSON.stringify(world.relationships)).toBe(before);
 });
+import { generate } from '../../src/sim/npcgen';
+import { dialogueFor } from '../../src/data/dialogue';
+it.each(generate(123, 50))('supports generated $archetypeId dialogue and speech thresholds', npc => {
+  const state = createDialogueState(), world = createWorld(), relationships = createRelationshipState();
+  const ctx = { actorId: 'player', npc, time, value: 0 }, opening = buildDialogue(state, ctx);
+  expect(opening.line).toContain(npc.speech.politeAddress.replace('{name}', '플레이어'));
+  const casual = buildDialogue(state, { ...ctx, value: npc.speech.informalAt }).line;
+  expect(casual).not.toBe(buildDialogue(state, { ...ctx, value: npc.speech.informalAt - 1 }).line);
+  expect(casual).toContain(npc.speech.informalAddress.replace('{name}', '플레이어'));
+  expect(talk(world, relationships, state, 'chat', ctx, opening.choices[0]).line).toBeTruthy();
+  expect(recordDialogue(state, 'gift', npc, interact(world, relationships, 'player', npc, time,
+    { id: 'gift:scarf', topic: '수선', tone: 'quiet' }))).toBeTruthy();
+  expect(confess(state, { ...ctx, value: 90 }, { playerWantsDating: true, npcWantsDating: true }).accepted).toBe(true);
+  expect(dialogueFor({ ...npc, archetypeId: undefined } as typeof npc)).toEqual(dialogueFor(npc));
+});
