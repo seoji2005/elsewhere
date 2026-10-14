@@ -1,4 +1,4 @@
-import { dialogueTemplates, sharedMemoryTemplates } from '../data/dialogue';
+import { dialogueFor, sharedMemoryTemplates } from '../data/dialogue';
 import type { Npc } from '../data/npcs';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
@@ -17,7 +17,7 @@ export interface DialogueContext {
 export function createDialogueState(): DialogueState { return { memories: {}, dating: [] }; }
 function validate(ctx: DialogueContext): void {
   minuteOf(ctx.time);
-  if (!ctx.actorId || ctx.actorId === ctx.npc.id || !dialogueTemplates[ctx.npc.id]) {
+  if (!ctx.actorId || ctx.actorId === ctx.npc.id || !ctx.npc.id) {
     throw Error('Invalid dialogue context');
   }
   relationshipStage(ctx.value);
@@ -27,7 +27,7 @@ export function isDating(state: DialogueState, actorId: string, npcId: string): 
 }
 export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
-  const template = dialogueTemplates[ctx.npc.id];
+  const template = dialogueFor(ctx.npc, ctx.value, ctx.actorId);
   const memories = state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
   const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
@@ -62,7 +62,7 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
 // Existing gift callers pass giveGift()'s result here; never grant score twice.
 export function recordDialogue(state: DialogueState, eventId: string, npc: Npc,
   entry: Interaction): string {
-  if (!dialogueTemplates[npc.id] || entry.npcId !== npc.id) throw Error('NPC mismatch');
+  if (entry.npcId !== npc.id) throw Error('NPC mismatch');
   const memories = state.memories[npc.id] ?? createMemoryState(npc.id);
   const now = minuteOf(entry.time);
   const repeated = memories.entries.some(memory => memory.subjectId === entry.actorId
@@ -70,7 +70,7 @@ export function recordDialogue(state: DialogueState, eventId: string, npc: Npc,
     && now - memory.created < 14 * 1440);
   remember(memories, eventId, entry);
   state.memories[npc.id] = memories;
-  const template = dialogueTemplates[npc.id];
+  const template = dialogueFor(npc, entry.value, entry.actorId);
   if (entry.choice.id.startsWith('gift:')) {
     return npc.dislikes.includes(entry.choice.topic) ? template.dislikedGift : template.gift;
   }
@@ -92,6 +92,6 @@ export function confess(state: DialogueState, ctx: DialogueContext, consent: Con
   if (accepted && !isDating(state, ctx.actorId, ctx.npc.id)) {
     state.dating.push({ actorId: ctx.actorId, npcId: ctx.npc.id });
   }
-  const template = dialogueTemplates[ctx.npc.id];
+  const template = dialogueFor(ctx.npc, ctx.value, ctx.actorId);
   return { accepted, line: accepted ? template.accept : template.refuse };
 }

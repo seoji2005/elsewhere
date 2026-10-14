@@ -1,3 +1,6 @@
+import { archetypes } from './archetypes';
+import type { Npc } from './npcs';
+import type { GeneratedNpc } from '../sim/npcgen';
 export interface DialogueTemplate {
   greeting: string; familiar: string; chat: string; repeat: string;
   gift: string; dislikedGift: string; accept: string; refuse: string;
@@ -53,3 +56,27 @@ export const dialogueTemplates: Record<string, DialogueTemplate> = {
     accept: '…응. 일정 빈칸은 이제 네 이름으로 채울게.', refuse: '고마워. 그래도 그건 대충 맞출 수 있는 각도가 아니야.',
   },
 };
+const archetypeLines: Record<string, [string, string]> = {
+  composed: ['오늘은 약속을 지키기 좋은 날이네요.', '오늘도 약속은 기억하고 있네.'],
+  warm: ['같이 마시니 잔향이 더 좋네요.', '같이 마시니 잔향이 더 좋잖아.'],
+  artisan: ['수선할 물건은 오래 돌봐야 합니다.', '수선할 물건은 내가 돌본다.'],
+  explorer: ['빛씨는 어디까지 자라는 걸까요?', '빛씨가 또 다른 무늬를 냈구나.'],
+  dreamer: ['조용히 들으니 잔향이 남는 것 같아요.', '조용히 들으니 잔향이 남는 것 같아.'],
+  jester: ['오늘은 새 놀이를 해 볼까요?', '오늘은 새 놀이를 해 볼래?'],
+  organizer: ['다음 약속은 미리 정리해주세요.', '다음 약속은 미리 정리하자.'],
+  keeper: ['따뜻한 차를 한 잔 드릴게요.', '따뜻한 차를 한 잔 줄게.'],
+  wit: ['고요한 날에도 농담은 남겠네요.', '고요한 날에도 농담은 남겠네.'],
+  inventor: ['새로운 수선 방법을 해볼까요?', '새로운 수선 방법을 해보자.'],
+};
+export function dialogueFor(npc: Npc, value = 0, actorId = 'player'): DialogueTemplate {
+  if (dialogueTemplates[npc.id]) return dialogueTemplates[npc.id];
+  const generated = npc as Partial<GeneratedNpc>;
+  const archetype = archetypes.find(a => a.id === generated.archetypeId)
+    ?? archetypes.find(a => a.traits.every((trait, i) => trait === npc.traits[i])) ?? archetypes[0];
+  const speech = generated.speech ?? archetype.speech, informal = value >= speech.informalAt;
+  const address = (informal ? speech.informalAddress : speech.politeAddress).replace('{name}', actorId === 'player' ? '플레이어' : actorId);
+  const [polite, casual] = archetypeLines[archetype.id], line = `${address}, ${informal ? casual : polite}`;
+  return { greeting: line, familiar: line, chat: line, repeat: informal ? '그 얘기는 아까 했지.' : '그 얘기는 아까 했어요.',
+    gift: informal ? '마음 써 줘서 고마워.' : '마음 써 줘서 고마워요.', dislikedGift: informal ? '마음만 받을게.' : '마음만 받을게요.',
+    accept: informal ? '좋아. 함께 시간을 보내자.' : '좋아요. 함께 시간을 보내요.', refuse: informal ? '아직은 준비가 안 됐어.' : '아직은 준비가 안 됐어요.' };
+}

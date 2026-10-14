@@ -9,13 +9,13 @@ import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
 import { createWorkState, finishWork } from '../sim/work';
 import { createStore, expireVisits, restock, visitStore } from '../sim/store';
-import { createShopState, useItem } from '../sim/shop';
-import { createRelationshipState } from '../sim/relationship';
+import { createShopState, useItem, giveGift } from '../sim/shop';
+import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
-import { createMatchmakingState, resolveMatch } from '../sim/matchmaking';
-import { axes, createBonds, seedLegacy } from '../sim/bonds';
-import { createDialogueState } from '../sim/dialogue';
-import { createRippleState } from '../sim/ripple';
+import { createMatchmakingState, resolveMatch, requestMatch, type MatchRequest } from '../sim/matchmaking';
+import { axes, createBonds, seedLegacy, edgeKey, emptyBond } from '../sim/bonds';
+import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
+import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '../sim/ripple';
 import { createPurse, funds, personAccount, payPerson, dayCashflow } from '../sim/purse';
 import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, procure, producerJobs, type BusinessBook } from '../sim/business';
 import { jobs } from '../data/jobs';
@@ -235,6 +235,56 @@ export function createSession(storage: Storage, npcSeed?: number) {
       return { ok: true };
     } catch (error) { return { ok: false, error }; }
   };
+  // Seed only on social requests so restoration preserves every saved edge.
+  const seedAcquaintances = () => {
+    const homes = ['nest', 'quiet', 'high'];
+    const home = (n: typeof residents[number]) => n.schedule[0].find(s => homes.includes(s.placeId))?.placeId;
+    const work = (n: typeof residents[number]) => n.schedule.flat().find(s => !homes.includes(s.placeId))?.placeId;
+    for (const a of residents) for (const b of residents) if (a.id !== b.id &&
+      (home(a) === home(b) || work(a) !== undefined && work(a) === work(b))) {
+      (state.world.relationships[a.id] ??= {})[b.id] ??= 15;
+      state.bonds.edges[edgeKey(a.id, b.id)] ??= { ...emptyBond(), affection: 15, trust: 20, met: true };
+    }
+  };
+  const context = (npcId: string) => {
+    const npc = residents.find(n => n.id === npcId);
+    if (!npc) throw Error('Unknown resident');
+    return { actorId: 'player', npc, time: gameTime(state.world.clock), value: state.world.relationships.player?.[npcId] ?? 0 };
+  };
+  const publish = (id: string, npcId: string, topic: string, kind: SocialEvent['kind']) => {
+    seedAcquaintances();
+    const { world } = state, time = gameTime(world.clock);
+    world.people.player.placeId = state.player.placeId;
+    for (const n of residents) world.people[n.id].placeId = whereIs(n, time);
+    const event = { id, actorId: 'player', targetId: npcId, time, placeId: state.player.placeId, topic, kind };
+    for (const n of residents) deliverRipple(state.ripple, state.bonds, world, state.dialogue, event, n.id, time);
+  };
+  const social = {
+    buildDialogue(npcId: string) {
+      const result = buildDialogue(state.dialogue, context(npcId));
+      const names = Object.fromEntries(Object.values(state.world.people).map(p => [p.id, p.name]));
+      const notice = noticeLine(npcId, state.ripple, gameTime(state.world.clock), names);
+      return { ...result, line: notice ? `${notice} ${result.line}` : result.line };
+    },
+    talk(id: string, npcId: string, choice: DialogueChoice) {
+      const result = talk(state.world, state.relationships, state.dialogue, id, context(npcId), choice);
+      publish(id, npcId, choice.topic, result.entry.change < 0 ? 'hurt' : 'help'); return result;
+    },
+    giveGift(id: string, npcId: string, itemId: string) {
+      if (!id || state.dialogue.memories[npcId]?.entries.some(m => m.id === id)) throw Error('Invalid or duplicate gift event');
+      const ctx = context(npcId), entry = giveGift(state.shop, state.world, state.relationships, 'player', ctx.npc, itemId, ctx.time);
+      const line = recordDialogue(state.dialogue, id, ctx.npc, entry);
+      publish(id, npcId, entry.choice.topic, entry.change < 0 ? 'hurt' : 'help'); return { entry, line };
+    },
+    confess(id: string, npcId: string, consent: Consent) {
+      if (!id) throw Error('Missing event ID');
+      const wasDating = isDating(state.dialogue, 'player', npcId), result = confess(state.dialogue, context(npcId), consent);
+      if (result.accepted && !wasDating) publish(id, npcId, '교제', 'dating'); return result;
+    },
+    requestMatch(request: MatchRequest) {
+      seedAcquaintances(); return requestMatch(state.matchmaking, state.encounters, state.world, request);
+    },
+  };
   const tick = (realSeconds: number): SaveResult | undefined => {
     const days = advanceClock(state.world.clock, realSeconds);
     const target = state.world.clock.totalMinutes, { world, book, purses } = state;
@@ -256,7 +306,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
         const byPlace = new Map<string, typeof residents>();
         for (const npc of residents) {
           const place = whereIs(npc, now), present = byPlace.get(place) ?? [];
-          present.push(npc); byPlace.set(place, present);
+          present.push(npc); byPlace.set(place, present); world.people[npc.id].placeId = place;
         }
         for (const b of book.businesses) if (b.closedAt === null && b.openedAt <= minute) {
           expireVisits(b.store, now);
@@ -289,6 +339,13 @@ export function createSession(storage: Storage, npcSeed?: number) {
             }
           }
         }
+        for (const notice of [...state.ripple.notices]) {
+          const time = { day: Math.floor(notice.created / 1440) + 1, hour: Math.floor(notice.created % 1440 / 60), minute: notice.created % 60 };
+          const event = { id: notice.eventId, actorId: notice.actorId, targetId: notice.targetId, time,
+            placeId: world.people[notice.observerId].placeId!, topic: notice.topic, kind: notice.kind };
+          for (const npc of byPlace.get(event.placeId) ?? [])
+            deliverRipple(state.ripple, state.bonds, world, state.dialogue, event, npc.id, now, notice.observerId);
+        }
         payWages();
       }
       if (minute % 1440 === 0) {
@@ -310,5 +367,5 @@ export function createSession(storage: Storage, npcSeed?: number) {
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
-  return { state, loadResult, tick, saveNow };
+  return { state, loadResult, tick, saveNow, ...social };
 }
