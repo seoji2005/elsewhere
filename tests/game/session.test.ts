@@ -7,6 +7,7 @@ import { advanceDay, applyEvent } from '../../src/sim/market';
 import { whereIs } from '../../src/sim/npc';
 import { npcs } from '../../src/data/npcs';
 import { gameTime } from '../../src/sim/clock';
+import { generate } from '../../src/sim/npcgen';
 function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
@@ -32,7 +33,7 @@ it('migrates version 1 world saves', () => {
   const storage = memory(), world = createWorld(); world.clock.totalMinutes = 2881;
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'cafe' };
   storage.setItem(SESSION_KEY, saveWorld(world));
-  const next = createSession(storage); expect(next.loadResult.ok).toBe(true); expect(next.state.world).toEqual(world);
+  const next = createSession(storage); expect(next.loadResult.ok).toBe(true); expect(next.state.world).toMatchObject(world);
   expect(next.state.market.day).toBe(3); expect(next.state.player.placeId).toBe('cafe'); expect(next.saveNow().ok).toBe(true);
 });
 it('advances each skipped day and saves by game time, on day changes and explicitly', () => {
@@ -47,4 +48,22 @@ it('reports storage failures while time continues and retains unbacked damaged d
   const storage = memory(); storage.setItem(SESSION_KEY, '{'); storage.setItem = () => { throw Error('quota'); };
   const session = createSession(storage); expect(session.tick(1441)?.ok).toBe(false);
   expect(session.state.world.clock.totalMinutes).toBe(1441); expect(storage.getItem(SESSION_KEY)).toBe('{');
+});
+it('restores seeded residents, migrates seedless v2 saves and resolves generated dates', () => {
+  const storage = memory(), session = createSession(storage); session.saveNow();
+  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); saved.state.npcSeed = 123;
+  storage.setItem(SESSION_KEY, JSON.stringify(saved)); const first = createSession(storage);
+  expect(first.state.world.people).toEqual(createSession(storage).state.world.people);
+  first.saveNow(); expect(createSession(storage).state.npcSeed).toBe(123);
+  saved.state.npcSeed = 456; storage.setItem(SESSION_KEY, JSON.stringify(saved));
+  expect(first.state.world.people).not.toEqual(createSession(storage).state.world.people);
+  delete saved.state.npcSeed; storage.setItem(SESSION_KEY, JSON.stringify(saved)); const old = createSession(storage);
+  expect(old.loadResult.ok).toBe(true); expect(old.state.npcSeed).toBe(0); expect(Object.keys(old.state.world.people)).toHaveLength(57);
+  const npc = generate(0, 50)[0], time = { day: 1, hour: 12, minute: 0 }, placeId = whereIs(npc, time);
+  old.state.player.placeId = placeId;
+  old.state.matchmaking.appointments.push({ id: 'date', actorId: 'player', introducerId: 'aro', npcId: npc.id, placeId, time,
+    impression: { name: npc.name, appearance: npc.appearance, keywords: npc.traits }, playerInterest: 2, npcInterest: 2, status: 'scheduled', noShowBy: [] });
+  old.tick(720); expect(old.state.world.people[npc.id].placeId).toBe(placeId);
+  for (const n of generate(0, 50)) expect(old.state.world.people[n.id].placeId).toBe(whereIs(n, time));
+  expect(old.state.matchmaking.appointments[0].status).toBe('met'); expect(old.state.encounters.met[0].npcId).toBe(npc.id);
 });
