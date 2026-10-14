@@ -18,6 +18,7 @@ import { useItem } from '../../src/sim/shop';
 import { checkoutBusiness, producerJobs, revenueChange } from '../../src/sim/business';
 import { createPurse, dayCashflow } from '../../src/sim/purse';
 import { companies } from '../../src/data/companies';
+import { compactLedger, transfer, type Transaction } from '../../src/sim/ledger';
 function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
@@ -157,7 +158,7 @@ it('conserves all seven wallets for 30 days and produces identical split/reloade
   expect(split.state).toEqual(whole.state); expect(whole.state.settledDay).toBe(30);
   const { balances, transactions } = whole.state.world.ledger;
   expect(Object.keys(balances).filter(id => balances[id] > 0).sort()).toEqual(['aro', 'iri', 'lise', 'nuel', 'player', 'sori', 'velo']);
-  expect(transactions.length).toBeGreaterThan(30);
+  expect(transactions.length + whole.state.world.ledger.history!.ids.length).toBeGreaterThan(30);
   expect(transactions.every(t => Object.hasOwn(balances, t.from) && Object.hasOwn(balances, t.to))).toBe(true);
   expect(whole.state.work.shifts.every(s => s.paid)).toBe(true);
 });
@@ -204,8 +205,10 @@ it('balances 30 days of tea demand and pays a care worker without employing tune
     session.tick(1440); expect(state.world.ledger.balances.nuel).toBeGreaterThanOrEqual(1000);
     expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
   }
-  const revenue = state.book.businesses[0].store.events.reduce((sum, e) => sum + e.amount, 0);
-  const wages = state.world.ledger.transactions.filter(t => t.reason.startsWith('Wage: ')).reduce((sum, t) => sum + t.amount, 0);
+  const revenue = Object.values(state.revenueHistory['tea-counter']).reduce((sum, n) => sum + n, 0) +
+    state.book.businesses[0].store.events.reduce((sum, e) => sum + e.amount, 0);
+  const wages = Object.values(state.world.ledger.history!.days).reduce((sum, day) => sum + (day.iri?.[0] ?? 0), 0) +
+    state.world.ledger.transactions.filter(t => t.reason.startsWith('Wage: ')).reduce((sum, t) => sum + t.amount, 0);
   expect({ revenue, wages, owner: state.world.ledger.balances.nuel, employee: state.world.ledger.balances.iri })
     .toEqual({ revenue: 336, wages: 120, owner: 1216, employee: 1088 });
   expect(wages).toBeLessThanOrEqual(revenue); expect(state.work.shifts.every(s => s.paid)).toBe(true);
@@ -256,8 +259,12 @@ it.each([0, 1, 123, 0xffffffff])('runs a conserved, funded 56-resident economy f
     expect(b.store.stock[0].backroom + b.store.stock[0].displayed).toBe(10);
   }
   const started = performance.now(), minima: Record<string, number> = {};
+  const transactions = new Map<string, Transaction>(), events = state.book.businesses.map(() => new Map());
   for (let day = 1; day <= 30; day++) {
-    session.tick(1440);
+    session.tick(1439);
+    ledger.transactions.forEach(t => transactions.set(t.id, t));
+    state.book.businesses.forEach((b, i) => b.store.events.forEach(e => events[i].set(e.visitId, e)));
+    session.tick(1);
     expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
     for (const b of state.book.businesses) {
       minima[b.id] = Math.min(minima[b.id] ?? Infinity, ledger.balances[b.ownerId]);
@@ -267,15 +274,19 @@ it.each([0, 1, 123, 0xffffffff])('runs a conserved, funded 56-resident economy f
   }
   const elapsed = performance.now() - started;
   expect(elapsed).toBeLessThan(2000); expect(state.work.shifts.every(s => s.paid)).toBe(true);
-  const report = state.book.businesses.map(b => {
-    for (const event of b.store.events.filter(e => e.reason === 'purchased'))
+  ledger.transactions.forEach(t => transactions.set(t.id, t));
+  state.book.businesses.forEach((b, i) => b.store.events.forEach(e => events[i].set(e.visitId, e)));
+  const allTransactions = [...transactions.values()];
+  const report = state.book.businesses.map((b, i) => {
+    const allEvents = [...events[i].values()];
+    for (const event of allEvents.filter(e => e.reason === 'purchased'))
       expect(whereIs(residents.find(n => n.id === event.actorId)!, event.time)).toBe(b.placeId);
-    const orders = ledger.transactions.filter(t => t.reason.startsWith(`Procurement: ${b.id}:`));
+    const orders = allTransactions.filter(t => t.reason.startsWith(`Procurement: ${b.id}:`));
     expect(orders.length).toBeGreaterThan(0);
     expect(orders.every(t => residents.find(n => n.id === t.to)!.job === (b.id === 'light-counter' ? '빛씨 조율사' : producerJobs[b.store.stock[0].itemId]))).toBe(true);
-    const revenue = b.store.events.reduce((sum, e) => sum + e.amount, 0), units = revenue / b.store.stock[0].price;
+    const revenue = allEvents.reduce((sum, e) => sum + e.amount, 0), units = revenue / b.store.stock[0].price;
     expect(orders.length * 5 - units).toBe(b.store.stock[0].backroom + b.store.stock[0].displayed);
-    return { id: b.id, revenue, wages: ledger.transactions.filter(t => t.from === b.ownerId && t.reason.startsWith('Wage: '))
+    return { id: b.id, revenue, wages: allTransactions.filter(t => t.from === b.ownerId && t.reason.startsWith('Wage: '))
       .reduce((sum, t) => sum + t.amount, 0), owner: ledger.balances[b.ownerId], minimum: minima[b.id] };
   });
   if (seed === 123) console.log('C032 30-day report', JSON.stringify({ report, milliseconds: Math.round(elapsed), saveBytes: Buffer.byteLength(storage.getItem(SESSION_KEY)!) }));
@@ -291,7 +302,7 @@ it('keeps the same seeded economy for whole, split and saved ticks without redis
     expect(split.loadResult.ok).toBe(true); expect(split.state).toEqual(before);
   }
   expect(split.state).toEqual(whole.state);
-  expect(split.state.world.ledger.transactions.filter(t => t.reason === 'Initial allocation')).toHaveLength(50);
+  expect(split.state.world.ledger.history!.ids.filter(id => id.startsWith('initial:'))).toHaveLength(50);
 });
 it('settles all three listed shops once using their actual revenue, without affecting the unlisted shop', () => {
   const session = createSession(memory(), 123); session.tick(3 * 1440 - 1);
@@ -375,7 +386,10 @@ it('prunes only completed records older than 14 days at midnight in every store'
     expect(store.visits.filter(v => v.id.startsWith('old-')).map(v => v.status)).toEqual(['waiting']);
     expect(store.visits.some(v => v.id === 'boundary')).toBe(true);
   }
-  expect(state.book.businesses.map(b => b.store.events)).toEqual(events);
+  state.book.businesses.forEach((b, i) => {
+    expect(b.store.events).toEqual(events[i].filter(e => e.time.day >= 2));
+    expect(state.revenueHistory[b.id][1]).toBe(events[i].filter(e => e.time.day === 1).reduce((sum, e) => sum + e.amount, 0));
+  });
   expect(createSession(storage).state).toEqual(state);
 });
 it('measures 30/60-day saves and keeps completed shift and visit history bounded', () => {
@@ -554,3 +568,45 @@ it('rejects tired work without a shift and charges only actual work minutes acro
   whole.state.shop.residents.player.energy = 50; whole.tick(60);
   expect(whole.state.shop.residents.player.energy).toBeCloseTo(49);
 });
+
+it('compacts 180-day finances with exact totals, retries, stock prices and split/reloaded ticks', () => {
+  const storage = memory(), whole = createSession(memory(), 123);
+  let split = createSession(storage, 123);
+  const transactions = new Map<string, Transaction>(), events = split.state.book.businesses.map(() => new Map());
+  whole.tick(180 * 1440);
+  for (let day = 1; day <= 180; day++) {
+    split.tick(1439);
+    split.state.world.ledger.transactions.forEach(t => transactions.set(t.id, t));
+    split.state.book.businesses.forEach((b, i) => b.store.events.forEach(e => events[i].set(e.visitId, e)));
+    split.tick(1); split = createSession(storage); expect(split.loadResult.ok).toBe(true);
+  }
+  expect(split.state).toEqual(whole.state);
+  const { state } = split, ledger = state.world.ledger;
+  ledger.transactions.forEach(t => transactions.set(t.id, t));
+  const original = { balances: { ...ledger.balances }, transactions: [...transactions.values()] };
+  const before = structuredClone(original); compactLedger(original, 167);
+  expect(original).toEqual(ledger); expect(original.balances).toEqual(before.balances);
+  expect(Object.values(ledger.balances).reduce((sum, cash) => sum + cash, 0)).toBe(6100);
+  const expected = createSession(memory(), 123).state.market;
+  for (let day = 1; day <= 180; day++) {
+    state.book.businesses.forEach((b, i) => {
+      if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(expected, b.ownerId,
+        revenueChange({ ...b, store: { ...b.store, events: [...events[i].values()] } }, day));
+    });
+    advanceDay(expected);
+  }
+  expect(state.market).toEqual(expected);
+  state.book.businesses.forEach((b, i) => {
+    for (const [day, revenue] of Object.entries(state.revenueHistory[b.id]))
+      expect(revenue).toBe([...events[i].values()].filter(e => e.time.day === Number(day)).reduce((sum, e) => sum + e.amount, 0));
+  });
+  const retired = before.transactions.find(t => t.time.day === 1)!;
+  expect(transfer(ledger, { ...retired, time: gameTime(state.world.clock) })).toEqual({ ok: true, duplicate: true });
+  expect(ledger.balances).toEqual(before.balances);
+  const unpruned = JSON.parse(storage.getItem(SESSION_KEY)!);
+  unpruned.state.world.ledger = before; delete unpruned.state.revenueHistory;
+  unpruned.state.book.businesses.forEach((b: typeof state.book.businesses[number], i: number) => b.store.events = [...events[i].values()]);
+  const bytes = Buffer.byteLength(storage.getItem(SESSION_KEY)!), withoutPruning = Buffer.byteLength(JSON.stringify(unpruned));
+  console.log('C044 180-day save bytes', { bytes, withoutPruning });
+  expect(bytes).toBeLessThan(300 * 1024); expect(bytes).toBeLessThan(withoutPruning);
+}, 15000);
