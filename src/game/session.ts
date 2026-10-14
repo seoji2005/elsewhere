@@ -13,9 +13,9 @@ import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
 import { createWorkState, finishWork, startWork as beginWork } from '../sim/work';
 import { createStore, expireVisits, restock, visitStore } from '../sim/store';
 import { createShopState, useItem, giveGift, inviteHomeTea } from '../sim/shop';
-import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
+import { createRelationshipState, relationshipStage, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
-import { createMatchmakingState, resolveMatch, requestMatch, type MatchRequest } from '../sim/matchmaking';
+import { createMatchmakingState, resolveMatch, noShowEffects, requestMatch, type MatchRequest } from '../sim/matchmaking';
 import { minuteOf, createMemoryState, rememberSharedEvent, type SharedEvent } from '../sim/memory';
 import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly } from '../sim/bonds';
 import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
@@ -322,7 +322,26 @@ export function createSession(storage: Storage, npcSeed?: number) {
     for (const id of participants) rememberSharedEvent(state.dialogue.memories[id] ??= createMemoryState(id), event);
     return true;
   };
+  const requirePresent = (npcId: string) => {
+    const { npc, time } = context(npcId);
+    if (whereIs(npc, time) !== state.player.placeId) throw Error('지금 여기 없어요');
+  };
   const social = {
+    stageFor(npcId: string) {
+      const ctx = context(npcId);
+      if (state.relationMode === 'bonds') return stageOf(state.bonds, npcId, 'player', state.dialogue);
+      return isDating(state.dialogue, 'player', npcId) ? '연인 첫 단계'
+        : relationshipStage(Math.min(ctx.value, 89));
+    },
+    npcWantsDatingFor(npcId: string) {
+      const ctx = context(npcId);
+      return state.relationMode === 'legacy' ? ctx.value >= 90 : readBond(state.bonds, npcId, 'player').affection >= 30;
+    },
+    canConfessFor(npcId: string) {
+      const ctx = context(npcId);
+      return state.relationMode === 'legacy' ? ctx.value >= 60 : canStartDating(readBond(state.bonds, 'player', npcId),
+        readBond(state.bonds, npcId, 'player'), { playerWantsDating: true, npcWantsDating: social.npcWantsDatingFor(npcId) });
+    },
     setFeeling(npcId: string, feeling: 'friend' | 'crush' | 'love', id = `feeling:${JSON.stringify([npcId, state.bonds.applied.length])}`) {
       context(npcId);
       if (state.relationMode !== 'bonds' || state.bonds.applied.includes(id)) return false;
@@ -334,11 +353,13 @@ export function createSession(storage: Storage, npcSeed?: number) {
       state.bonds.applied.push(id); return true;
     },
     expressFeelings(npcId: string) {
+      requirePresent(npcId);
       const { time } = context(npcId), bond = readBond(state.bonds, npcId, 'player');
       return state.relationMode === 'bonds' && applyBondEvent(state.bonds, `feelings:${JSON.stringify([npcId, time.day])}`, time,
         [{ fromId: npcId, toId: 'player', delta: bond.affection >= 40 && bond.comfort >= 20 ? { romance: 6 } : { comfort: -3 } }]);
     },
     inviteHomeTea(id: string, npcId: string) {
+      requirePresent(npcId);
       const { npc, time } = context(npcId);
       if (state.relationMode !== 'bonds' || state.player.placeId !== 'nest' || whereIs(npc, time) !== 'nest') return false;
       const event = inviteHomeTea(state.shop, state.world, 'player', npc, id, time, state.bonds);
@@ -346,18 +367,20 @@ export function createSession(storage: Storage, npcSeed?: number) {
     },
     buildDialogue(npcId: string) {
       const result = buildDialogue(state.dialogue, context(npcId));
-      if (state.relationMode === 'bonds') result.stage = stageOf(state.bonds, npcId, 'player', state.dialogue);
+      result.stage = social.stageFor(npcId);
       const names = Object.fromEntries(Object.values(state.world.people).map(p => [p.id, p.name]));
       const notice = noticeLine(npcId, state.ripple, gameTime(state.world.clock), names);
       return { ...result, line: notice ? `${notice} ${result.line}` : result.line };
     },
     talk(id: string, npcId: string, choice: DialogueChoice) {
+      requirePresent(npcId);
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       const result = talk(state.world, state.relationships, state.dialogue, id, context(npcId), choice);
       if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, result.entry.time, [reactionEffect(result.entry)]);
       return result;
     },
     giveGift(id: string, npcId: string, itemId: string) {
+      requirePresent(npcId);
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       if (!id || state.dialogue.memories[npcId]?.entries.some(m => m.id === id)) throw Error('Invalid or duplicate gift event');
       const ctx = context(npcId), entry = giveGift(state.shop, state.world, state.relationships, 'player', ctx.npc, itemId, ctx.time);
@@ -366,6 +389,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       publish(id, npcId, entry.choice.topic, entry.change < 0 ? 'hurt' : 'help'); return { entry, line };
     },
     confess(id: string, npcId: string, consent: Consent) {
+      requirePresent(npcId);
       if (!id) throw Error('Missing event ID');
       const ctx = context(npcId), wasDating = isDating(state.dialogue, 'player', npcId);
       if (state.relationMode === 'bonds') ctx.value = canStartDating(readBond(state.bonds, 'player', npcId),
@@ -404,6 +428,8 @@ export function createSession(storage: Storage, npcSeed?: number) {
           ...(state.relationMode === 'bonds' ? [{ fromId: appointment.introducerId, toId: appointment.actorId, delta: { trust: 3 } }] : []),
         ]);
       }
+      if (appointment.status === 'no-show' && appointment.noShowBy.includes(appointment.actorId))
+        applyBondEvent(state.bonds, `match-no-show:${appointment.id}`, now, noShowEffects(appointment));
     }
   };
   const tick = (realSeconds: number): SaveResult | undefined => {
