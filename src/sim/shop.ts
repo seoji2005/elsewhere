@@ -5,6 +5,8 @@ import { transfer, type LedgerState, type TransferResult } from './ledger';
 import { validateTime } from './npc';
 import { interact, type RelationshipState, type Interaction } from './relationship';
 import type { WorldState } from './world';
+import { friendly, readBond, type Bonds } from './bonds';
+import type { SharedEvent } from './memory';
 
 export interface Purchase { id: string; actorId: string; itemId: string }
 export interface Lifestyle {
@@ -68,4 +70,17 @@ export function giveGift(state: ShopState, world: Pick<WorldState, 'relationship
     { id: `gift:${itemId}`, topic: item.topic, tone: item.tone });
   life.inventory[itemId]--;
   return result;
+}
+
+// Plan only: the caller confirms attendance before completing and remembering the meal.
+export function inviteHomeTea(state: ShopState, world: Pick<WorldState, 'relationships'>,
+  actorId: string, npc: Npc, eventId: string, time: GameTime, bonds?: Bonds): SharedEvent | null {
+  validateTime(time);
+  if (!eventId || !actorId || actorId === npc.id) throw Error('Invalid home invitation');
+  const familiar = bonds ? friendly(readBond(bonds, npc.id, actorId))
+    : (world.relationships[actorId]?.[npc.id] ?? 0) >= 30;
+  if ((state.residents[actorId]?.atmosphere ?? 0) < 5 || !familiar) return null;
+  return { id: eventId, actorId, kind: 'meal', participants: [actorId, npc.id],
+    placeId: 'nest', placeName: '겹빛 공동집', activityName: '함께 잔향 차 마시기',
+    time: { ...time }, status: 'planned' };
 }

@@ -4,6 +4,9 @@ import { createWorld } from '../../src/sim/world';
 import { createMemoryState, recall } from '../../src/sim/memory';
 import { createEncounterState, encounter, encounterCandidates, interestIn,
   type PlayerProfile } from '../../src/sim/encounter';
+import { createShopState, inviteHomeTea, useItem } from '../../src/sim/shop';
+import { rememberSharedEvent } from '../../src/sim/memory';
+import { createBonds, edgeKey } from '../../src/sim/bonds';
 
 const player: PlayerProfile = { id: 'player', traits: ['curious'], likes: ['빛씨'], dislikes: [], reputation: 0 };
 const time = { day: 1, hour: 9, minute: 0 };
@@ -54,4 +57,41 @@ it('keeps attraction directional and rejects malformed input before mutation', (
   expect(() => encounter(state, world, { ...player, reputation: NaN }, [aro], 'office', time)).toThrow();
   expect(() => encounter(state, world, player, [aro], 'office', { ...time, day: 0 })).toThrow();
   expect(state).toEqual(createEncounterState());
+});
+it('uses worn clothing rather than inventory for directional encounter interest', () => {
+  const shop = createShopState(), state = createEncounterState(), world = createWorld();
+  shop.residents.player = { inventory: { coat: 1, scarf: 1 }, energy: 50, appearance: 0,
+    atmosphere: 0, clothing: null, decorations: [] };
+  const dressed = { ...player, lifestyle: shop.residents.player };
+  const score = () => encounterCandidates(state, world, dressed, [aro], 'office', time)[0].score;
+  const base = score();
+  useItem(shop, 'player', 'coat');
+  expect(score()).toBe(base + 2);
+  expect(interestIn(dressed, aro)).toBe(interestIn(player, aro));
+  useItem(shop, 'player', 'scarf');
+  expect(score()).toBe(base + 1);
+  expect(() => encounterCandidates(state, world,
+    { ...player, lifestyle: { appearance: NaN } }, [aro], 'office', time)).toThrow();
+});
+it('opens a planned home tea meal only with decoration and friendship, then records completion', () => {
+  const shop = createShopState(), world = createWorld(), memory = createMemoryState(aro.id);
+  shop.residents.player = { inventory: { chime: 1, lamp: 1 }, energy: 50, appearance: 0,
+    atmosphere: 0, clothing: null, decorations: [] };
+  const invite = () => inviteHomeTea(shop, world, 'player', aro, 'tea-1', time);
+  world.relationships.player = { aro: 30 };
+  useItem(shop, 'player', 'chime');
+  expect(invite()).toBeNull();
+  useItem(shop, 'player', 'lamp');
+  world.relationships.player.aro = 29;
+  expect(invite()).toBeNull();
+  world.relationships.player.aro = 30;
+  const meal = invite()!;
+  expect(meal).toMatchObject({ kind: 'meal', placeId: 'nest', participants: ['player', 'aro'] });
+  expect(rememberSharedEvent(memory, meal)).toBe(false);
+  expect(rememberSharedEvent(memory, { ...meal, status: 'completed' })).toBe(true);
+  expect(rememberSharedEvent(memory, { ...meal, status: 'completed' })).toBe(false);
+  const bonds = createBonds();
+  expect(inviteHomeTea(shop, world, 'player', aro, 'tea-2', time, bonds)).toBeNull();
+  bonds.edges[edgeKey('aro', 'player')] = { met: true, affection: 30, trust: 15, comfort: 10, respect: 0, romance: 0 };
+  expect(inviteHomeTea(shop, world, 'player', aro, 'tea-2', time, bonds)?.status).toBe('planned');
 });

@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
 import { npcs, type Npc } from '../../src/data/npcs';
 import { createWorld } from '../../src/sim/world';
+import { applyBondEvent, createBonds, readBond } from '../../src/sim/bonds';
 import { createEncounterState, type PlayerProfile } from '../../src/sim/encounter';
-import { cancelMatch, createMatchmakingState, requestMatch, resolveMatch, respondToMatch,
+import { cancelMatch, createMatchmakingState, noShowEffects, requestMatch, resolveMatch, respondToMatch,
   type MatchRequest } from '../../src/sim/matchmaking';
 
 function setup(candidate: Npc = npcs[0]) {
@@ -19,7 +20,8 @@ it('a friend introduces a compatible acquaintance with appearance, personality a
   const { offer, request, state, encounters, candidate, world } = setup();
   const date = offer()!;
   expect(date.impression).toEqual({ name: candidate.name,
-    appearance: { hairColor: 'silver', height: 168 }, keywords: ['curious', 'quiet'] });
+    appearance: { hairColor: 'silver', height: 168 }, keywords: ['curious', 'quiet'],
+    note: '아로 님과 이야기하면 재미있을 거예요!' });
   expect(date.time).toEqual(request.slot.time);
   expect(date.time).not.toBe(request.slot.time);
   expect(date.impression.appearance).not.toBe(request.appearances[candidate.id]);
@@ -59,6 +61,34 @@ it('lets the player decline the first impression and blocks repeat offers on the
   request.slot.time.day = 3;
   expect(offer()?.status).toBe('offered');
   expect(encounters.met).toEqual([]);
+});
+it('adds clothing to NPC interest and uses the introducer speech for the note', () => {
+  const { offer, request } = setup({ ...npcs[0], dislikes: ['빛씨'] });
+  request.player.reputation = -25; // Base interest 0; the worn coat raises it to the acceptance threshold.
+  request.player.lifestyle = { appearance: 7 };
+  request.npcs = [{ ...npcs[1], speech: { politeEndings: ['입니다'] } } as Npc, request.npcs[1]];
+  const date = offer()!;
+  expect(date.npcInterest).toBe(2);
+  expect(respondToMatch(date, true, request.now)).toBe('scheduled');
+  expect(date.impression.note).toBe('아로 님은 빛씨에 관심이 있는 분입니다.');
+});
+it.each(['player', 'aro'])('returns directional trust losses only for player no-shows (%s missing)', personId => {
+  const { offer, request, candidate, encounters } = setup();
+  const date = offer()!;
+  expect(noShowEffects(date)).toEqual([]);
+  respondToMatch(date, true, request.now);
+  resolveMatch(date, encounters, candidate, { ...date.time, hour: 10 },
+    { playerPlaceId: personId === 'player' ? null : 'office', npcPlaceId: personId === 'aro' ? null : 'office' });
+  expect(noShowEffects(date)).toEqual(personId === 'aro' ? [] : [
+    { fromId: 'nuel', toId: 'player', delta: { trust: -5 } },
+    { fromId: 'aro', toId: 'player', delta: { trust: -10 } },
+  ]);
+  const bonds = createBonds(), id = `match-no-show:${date.id}`;
+  expect(applyBondEvent(bonds, id, date.time, noShowEffects(date))).toBe(true);
+  expect(applyBondEvent(bonds, id, date.time, noShowEffects(date))).toBe(false);
+  expect(readBond(bonds, 'nuel', 'player').trust).toBe(personId === 'player' ? -5 : 0);
+  expect(readBond(bonds, 'aro', 'player').trust).toBe(personId === 'player' ? -10 : 0);
+  expect(readBond(bonds, 'player', 'aro').trust).toBe(0);
 });
 it('evaluates NPC interest separately: player acceptance does not force reciprocation', () => {
   const { offer, request, encounters } = setup({ ...npcs[0], dislikes: ['빛씨'] });

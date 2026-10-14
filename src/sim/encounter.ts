@@ -3,11 +3,13 @@ import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, remember, type MemoryState } from './memory';
 import { whereIs } from './npc';
 import type { WorldState } from './world';
+import type { Lifestyle } from './shop';
 
 export type SocialWorld = Pick<WorldState, 'relationships'>;
 export interface PlayerProfile {
   id: string; traits: readonly Trait[]; likes: readonly string[];
   dislikes: readonly string[]; reputation: number; // -100..100
+  lifestyle?: Pick<Lifestyle, 'appearance'>;
 }
 export interface EncounterState {
   memories: Record<string, MemoryState>;
@@ -15,16 +17,19 @@ export interface EncounterState {
 }
 export function createEncounterState(): EncounterState { return { memories: {}, met: [] }; }
 export function validatePlayer(player: PlayerProfile): void {
-  if (!player.id || !Number.isFinite(player.reputation) || Math.abs(player.reputation) > 100) {
+  const appearance = player.lifestyle?.appearance ?? 0;
+  if (!player.id || !Number.isFinite(player.reputation) || Math.abs(player.reputation) > 100
+    || !Number.isFinite(appearance) || appearance < 0) {
     throw Error('Invalid player profile');
   }
 }
 // Directional: the viewer's dislikes and the other's reputation affect only this score.
 export function interestIn(viewer: Pick<Npc, 'traits' | 'likes' | 'dislikes'>,
-  other: Pick<Npc, 'traits' | 'likes'>, reputation = 0): number {
+  other: Pick<Npc, 'traits' | 'likes'> & Pick<PlayerProfile, 'lifestyle'>, reputation = 0): number {
   return 1 + viewer.traits.filter(trait => other.traits.includes(trait)).length
     + 2 * viewer.likes.filter(topic => other.likes.includes(topic)).length
-    - 3 * viewer.dislikes.filter(topic => other.likes.includes(topic)).length + reputation / 25;
+    - 3 * viewer.dislikes.filter(topic => other.likes.includes(topic)).length + reputation / 25
+    + Math.floor((other.lifestyle?.appearance ?? 0) / 3);
 }
 export function hasMet(state: EncounterState, world: SocialWorld, actorId: string, npcId: string): boolean {
   return state.met.some(entry => entry.actorId === actorId && entry.npcId === npcId)
