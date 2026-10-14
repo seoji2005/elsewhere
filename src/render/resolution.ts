@@ -5,7 +5,7 @@ import { WebGLRenderer } from 'three';
 // Quality ladder: when fps < 50, apply the next cheaper step (effects first, in the given order),
 // then lower the pixel ratio toward minDpr; at fps >= 58 undo the last step. Sharpness goes last.
 export function adaptiveResolution(renderer: WebGLRenderer,
-  maxDpr = Math.min(window.devicePixelRatio || 1, 2.5), // phones are ~3x; 1.25 looked like 480p
+  maxDpr = Math.min(window.devicePixelRatio || 1, 2), // user phone: 2.5x = 55fps, 2x = stable 60 (shadow lookups scale with pixels)
   onResize?: (dpr: number, width: number, height: number) => void,
   steps: ((cheaper: boolean) => void)[] = [], minDpr = Math.min(1.6, maxDpr)) {
   if (!(maxDpr > 0 && Number.isFinite(maxDpr) && minDpr > 0 && minDpr <= maxDpr)) throw new RangeError('Invalid DPR');
