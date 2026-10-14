@@ -54,7 +54,7 @@ it('creates unique fictional names, usable NPC profiles and varied appearance', 
 
 it('keeps all weekly intervals within capacity including core residents', () => {
   for (const seed of [0, 1, 21, 42, 0xffffffff]) {
-    const generated = generate(seed, seed === 42 ? 67 : 50);
+    const generated = generate(seed, seed === 42 ? 66 : 50); // 42: fill to capacity (66 with 6 core residents)
     const residents: Npc[] = [...npcs, ...generated];
     for (const npc of generated) {
       expect(npc.schedule).toHaveLength(7);
