@@ -1,0 +1,33 @@
+# Screenshots on a GitHub runner (~5x faster than the server). Push a commit to
+# shots/<name> containing .shots-request (one tools/shot.mjs argument per line);
+# results are force-pushed to shots-result/<name>. Helper: ~/ops/bin/gha-shots
+name: shots
+on:
+  push:
+    branches: ['shots/**']
+permissions:
+  contents: write
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:single
+      - name: Shots
+        run: |
+          mapfile -t args < <(grep -v '^\s*$' .shots-request)
+          s=$(date +%s); node tools/shot.mjs "${args[@]}" 2>&1 | tee shot.log; e=$(date +%s)
+          echo "seconds: $((e - s))" >> shot.log
+      - name: Push results
+        run: |
+          name=${GITHUB_REF_NAME#shots/}
+          mkdir -p out && cp -r .shots/. out/ && cp shot.log out/
+          cd out && git init -q && git checkout -q -b r
+          git config user.name shots-bot; git config user.email shots-bot@users.noreply.github.com
+          git add -A && git commit -qm "shots for $name"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" "r:shots-result/$name"

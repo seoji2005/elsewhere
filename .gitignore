@@ -4,3 +4,4 @@ dist-single
 .shots
 test-results
 .vite-cache
+.shots-gha
