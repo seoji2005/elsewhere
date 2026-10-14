@@ -3,9 +3,9 @@ import { npcs } from '../../src/data/npcs';
 import { places } from '../../src/data/places';
 import { whereIs } from '../../src/sim/npc';
 
-it('has five complete residents and seven named places with valid weekly schedules', () => {
-  expect(npcs).toHaveLength(5);
-  expect(new Set(npcs.map(npc => npc.id)).size).toBe(5);
+it('has six complete residents and seven named places with valid weekly schedules', () => {
+  expect(npcs).toHaveLength(6);
+  expect(new Set(npcs.map(npc => npc.id)).size).toBe(6);
   expect(places).toHaveLength(7);
   expect(new Set(places.map(place => place.id)).size).toBe(7);
   for (const npc of npcs) {

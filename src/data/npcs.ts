@@ -40,4 +40,13 @@ export const npcs: readonly Npc[] = [
   { id: 'iri', name: '이리', age: 38, job: '떠오름 뜰 돌봄사',
     traits: ['social', 'practical'], likes: ['빛씨', '수선'], dislikes: ['큰 소리'],
     schedule: week('high', 'park', 300, 780, 2) },
+  // Busy tuner; her one solo hour is the late lantern round in the park.
+  { id: 'lise', name: '리세', age: 27, job: '빛고리 조율실 수석 조율사',
+    traits: ['practical', 'quiet'], likes: ['빗소리', '약속'], dislikes: ['낭비', '큰 소리'],
+    schedule: Array.from({ length: 7 }, (_, day) => day === 4
+      ? [{ fromMinute: 0, placeId: 'quiet' }, { fromMinute: 480, placeId: 'office' },
+        { fromMinute: 660, placeId: 'cafe' }, { fromMinute: 780, placeId: 'quiet' },
+        { fromMinute: 1320, placeId: 'park' }]
+      : [{ fromMinute: 0, placeId: 'quiet' }, { fromMinute: 360, placeId: 'office' },
+        { fromMinute: 1140, placeId: 'quiet' }, { fromMinute: 1320, placeId: 'park' }]) },
 ];
