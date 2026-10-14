@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "assets": "node tools/assets.mjs",
     "build": "tsc --noEmit && vite build",
     "check": "bash tools/check.sh",
     "build:single": "tsc --noEmit && vite build --mode single"

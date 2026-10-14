@@ -22,7 +22,9 @@ let total = 0;
 for (const file of files) {
   const inScope = allowed.some(pattern => pattern.test(file));
   let lines;
-  if (untracked.has(file)) {
+  if (readFileSync(file).includes(0)) {
+    lines = 0; // Binary assets still undergo the scope check.
+  } else if (untracked.has(file)) {
     const contents = readFileSync(file, 'utf8');
     lines = contents ? contents.split('\n').length - Number(contents.endsWith('\n')) : 0;
   } else {

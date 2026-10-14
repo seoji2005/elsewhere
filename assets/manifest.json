@@ -1,0 +1,35 @@
+{
+  "city": {
+    "directory": "/home/dev/asset-packs/q-city/Exports/glTF (Godot)",
+    "files": [
+      "Building_Small_1.gltf",
+      "Building_Medium_2_001.gltf",
+      "Building_Large_2.gltf",
+      "Street_4Lane.gltf",
+      "Street_4WayIntersection.gltf",
+      "Sidewalk_Straight_3m.gltf",
+      "Sidewalk_Corner_Round_3m.gltf",
+      "Prop_Bollard.gltf",
+      "Prop_Planter_Single.gltf",
+      "Prop_ACUnit.gltf",
+      "Door_1.gltf",
+      "Entrance_Concrete_2x1.gltf"
+    ]
+  },
+  "nature": {
+    "directory": "/home/dev/asset-packs/q-nature/glTF",
+    "files": [
+      "CommonTree_1.gltf",
+      "CommonTree_2.gltf",
+      "Bush_Common.gltf"
+    ]
+  },
+  "cars": {
+    "directory": "/home/dev/asset-packs/k-car-kit/Models/GLB format",
+    "files": [
+      "sedan.glb",
+      "taxi.glb",
+      "van.glb"
+    ]
+  }
+}
