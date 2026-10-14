@@ -23,6 +23,60 @@ function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
 }
+it('C055: v2 confession uses legacy eligibility and consent, with dating recorded before the lover label', () => {
+  const storage = memory(), initial = createSession(storage, 123);
+  initial.state.world.relationships.player = { lise: 90 }; initial.saveNow();
+  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); saved.version = 2;
+  storage.setItem(SESSION_KEY, JSON.stringify(saved)); const session = createSession(storage), { state } = session;
+  state.player.placeId = 'quiet';
+  expect(state.relationMode).toBe('legacy'); expect(session.stageFor('lise')).toBe('호감');
+  expect(readBond(state.bonds, 'lise', 'player').affection).toBe(0);
+  for (const [score, eligible, willing] of [[59, false, false], [60, true, false], [89, true, false], [90, true, true]] as const) {
+    state.world.relationships.player.lise = score;
+    expect(session.canConfessFor('lise')).toBe(eligible); expect(session.npcWantsDatingFor('lise')).toBe(willing);
+    expect(session.confess(`refuse:${score}`, 'lise', { playerWantsDating: false, npcWantsDating: willing }).accepted).toBe(false);
+    if (score < 90) expect(session.confess(`low-score:${score}`, 'lise',
+      { playerWantsDating: true, npcWantsDating: true }).accepted).toBe(false);
+  }
+  expect(session.confess('refuse-consent', 'lise', { playerWantsDating: true, npcWantsDating: false }).accepted).toBe(false);
+  expect(session.confess('legacy-date', 'lise', { playerWantsDating: true,
+    npcWantsDating: session.npcWantsDatingFor('lise') }).accepted).toBe(true);
+  expect(session.stageFor('lise')).toBe('연인 첫 단계'); session.saveNow();
+  expect(createSession(storage).stageFor('lise')).toBe('연인 첫 단계');
+});
+it.each([[false, false], [true, false], [false, true]])('C055: no-show applies once; skipped=%s, player present=%s', (skipped, present) => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session, npc = generate(123, 50)[0];
+  const date: typeof state.matchmaking.appointments[number] = { id: 'missed-date', actorId: 'player', introducerId: 'aro',
+    npcId: npc.id, placeId: 'cafe', time: { day: 1, hour: 12, minute: 0 },
+    impression: { name: npc.name, appearance: npc.appearance, keywords: npc.traits, note: '' },
+    playerInterest: 2, npcInterest: 2, status: 'scheduled', noShowBy: [] };
+  state.matchmaking.appointments.push(date); session.tick(660);
+  state.player.placeId = present ? 'cafe' : 'shop';
+  if (present) date.npcId = 'lise'; // Lise stays at the office throughout this appointment.
+  if (skipped) { expect(session.startWork('exchange-helper').ok).toBe(true); session.tick(120); }
+  else for (let minute = 0; minute < 120; minute++) session.tick(1);
+  expect(date.status).toBe('no-show'); expect(date.noShowBy.includes('player')).toBe(!present);
+  expect(readBond(state.bonds, 'aro', 'player').trust).toBe(present ? 0 : -5);
+  expect(readBond(state.bonds, date.npcId, 'player').trust).toBe(present ? 0 : -10);
+  expect(state.bonds.applied.filter(id => id === 'match-no-show:missed-date')).toHaveLength(present ? 0 : 1);
+  const bonds = structuredClone(state.bonds); session.tick(0); session.tick(1); session.saveNow();
+  const next = createSession(storage); next.tick(1); expect(next.state.bonds).toEqual(bonds);
+});
+it('C055: crossing 06:00 rejects all five interactions without mutations; co-located talk and gift work', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  state.player.placeId = 'quiet'; session.tick(359);
+  state.shop.residents.player.inventory.bread = 2;
+  const choice = session.buildDialogue('lise').choices[0];
+  expect(session.talk('present-chat', 'lise', choice).entry.npcId).toBe('lise');
+  expect(session.giveGift('present-gift', 'lise', 'bread').entry.npcId).toBe('lise'); session.tick(1);
+  expect(state.world.people.lise.placeId).toBe('office'); const before = structuredClone(state);
+  for (const action of [() => session.talk('absent-chat', 'lise', choice),
+    () => session.giveGift('absent-gift', 'lise', 'bread'),
+    () => session.confess('absent-date', 'lise', { playerWantsDating: true, npcWantsDating: true }),
+    () => session.expressFeelings('lise'), () => session.inviteHomeTea('absent-tea', 'lise')]) {
+    expect(action).toThrow('지금 여기 없어요'); expect(state).toEqual(before);
+  }
+});
 it('C050: completed exchange arrears allow cafe work and remain payable later', () => {
   const session = createSession(memory(), 123), { state } = session;
   session.tick(1440 + 480);
@@ -495,7 +549,7 @@ it('applies light revenue growth to its price exactly once at midnight', () => {
 
 it('applies ten chats and a gift once to the receiving bond, including after reload', () => {
   const storage = memory(), session = createSession(storage, 123), { state } = session;
-  expect(session.buildDialogue('lise').stage).toBe('낯섦');
+  state.player.placeId = 'quiet'; expect(session.buildDialogue('lise').stage).toBe('낯섦');
   for (let i = 0; i < 10; i++) session.talk(`bond-chat:${i}`, 'lise', session.buildDialogue('lise').choices[0]);
   expect(readBond(state.bonds, 'lise', 'player')).toMatchObject({ affection: 7, comfort: 3, trust: 0, respect: 0, romance: 0, met: true });
   expect(readBond(state.bonds, 'player', 'lise').affection).toBe(0);
@@ -515,6 +569,7 @@ it('applies ten chats and a gift once to the receiving bond, including after rel
 });
 it('requires both bonds and both consents for dating, independently of legacy scores', () => {
   const session = createSession(memory(), 123), { state } = session;
+  state.player.placeId = 'quiet';
   const ready = { affection: 40, trust: 25, respect: 0, comfort: 20, romance: 60, met: true };
   const consent = { playerWantsDating: true, npcWantsDating: true };
   state.world.relationships.player = { lise: 90 };
@@ -544,7 +599,7 @@ it('keeps legacy dialogue, gifts and dating unchanged after restoring an old sav
   const storage = memory(), initial = createSession(storage, 123); initial.saveNow();
   const saved = JSON.parse(storage.getItem(SESSION_KEY)!); saved.version = 2;
   storage.setItem(SESSION_KEY, JSON.stringify(saved)); const session = createSession(storage), { state } = session;
-  expect(state.relationMode).toBe('legacy');
+  expect(state.relationMode).toBe('legacy'); state.player.placeId = 'quiet';
   session.talk('legacy-chat', 'lise', session.buildDialogue('lise').choices[0]);
   state.shop.residents.player = { inventory: { bread: 1 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
   session.giveGift('legacy-gift', 'lise', 'bread'); expect(state.world.relationships.player.lise).toBe(10);
@@ -692,7 +747,7 @@ it('C051: completed work rewards only its owner and overlapping coworkers once, 
   expect(readBond(state.bonds, 'generated-123-17', 'player').trust).toBe(0);
   const bonds = structuredClone(state.bonds); session.saveNow(); const next = createSession(storage);
   next.tick(1); expect(next.state.bonds).toEqual(bonds);
-});
+}, 60_000); // 180 game days; slow when several worker runs share the server
 it('C051: feelings, tea attendance, daily caps, lowering choices and saved event receipts', () => {
   const storage = memory(), session = createSession(storage, 123), { state } = session, id = 'generated-123-0';
   expect(session.expressFeelings(id)).toBe(true); expect(session.expressFeelings(id)).toBe(false);
@@ -711,7 +766,8 @@ it('C051: feelings, tea attendance, daily caps, lowering choices and saved event
   session.saveNow(); const next = createSession(storage), before = structuredClone(next.state);
   expect(next.expressFeelings(id)).toBe(false); expect(next.inviteHomeTea('tea', id)).toBe(false);
   expect(next.setFeeling(id, 'love', 'love')).toBe(false); expect(next.state).toEqual(before);
-  next.tick(420); expect(next.inviteHomeTea('absent', id)).toBe(false);
+  next.tick(420); expect(() => next.inviteHomeTea('absent', id)).toThrow('지금 여기 없어요');
+  next.state.player.placeId = whereIs(generate(123, 50)[0], gameTime(next.state.world.clock));
   next.state.relationMode = 'legacy'; const legacy = structuredClone(next.state);
   expect(next.expressFeelings(id)).toBe(false); expect(next.setFeeling(id, 'love')).toBe(false);
   expect(next.inviteHomeTea('legacy', id)).toBe(false); expect(next.state).toEqual(legacy);
