@@ -1,8 +1,7 @@
 import * as T from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { VRMLoaderPlugin, VRMUtils, type VRM, type VRMHumanBoneName } from '@pixiv/three-vrm';
-import avatar from '../assets/avatar.vrm?url';
+import { type VRM, type VRMHumanBoneName } from '@pixiv/three-vrm';
+import { cloneModel } from './model';
+import { outfits, type Outfit } from './wardrobe';
 import { loadAssets } from '../render/assets';
 import { WALK, RUN } from '../player/character';
 
@@ -42,34 +41,34 @@ function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: numbe
 
 // Anime hero: VRM (MToon toon shading + outlines, spring-bone hair and skirt), retargeted UAL idle / walk / jog,
 // automatic blinks, an occasional smile and eyes that follow the camera.
-export async function loadAvatar(camera: T.Camera) {
-  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).register(parser => new VRMLoaderPlugin(parser));
-  const [gltf, motion] = await Promise.all([loader.loadAsync(avatar), loadAssets('people')]);
-  const vrm: VRM = gltf.userData.vrm;
-  VRMUtils.removeUnnecessaryVertices(vrm.scene);
-  VRMUtils.combineSkeletons(vrm.scene);
-  VRMUtils.combineMorphs(vrm);
-  VRMUtils.rotateVRM0(vrm);
-  vrm.scene.traverse(object => { object.frustumCulled = false; });
+let motions: ReturnType<typeof loadAssets> | undefined;
+export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outfits[0], phase = 0) {
+  const [vrm, motion] = await Promise.all([cloneModel(outfit), motions ??= loadAssets('people')]);
+  const bodyScale = sd === 2 ? 0.64 : sd === 1 ? 0.82 : 1;
+  // Scale the raw rig, including clothing/spring roots; normalized animation only transfers rotations and hips position.
+  vrm.humanoid.getRawBoneNode('hips')!.scale.setScalar(bodyScale);
+  vrm.humanoid.getRawBoneNode('head')!.scale.setScalar(sd === 2 ? 2.9 : sd === 1 ? 1.8 : 1);
   vrm.scene.updateMatrixWorld(true);
   const rig = motion.scene.getObjectByName('UAL1_Standard')!;
   motion.scene.updateMatrixWorld(true);
   let pelvis = rig;
   rig.traverse(object => { if (object.userData.name === 'pelvis') pelvis = object; });
-  const v = new T.Vector3(), scale = vrm.humanoid.getNormalizedBoneNode('hips')!.getWorldPosition(v).y / pelvis.getWorldPosition(v).y;
+  const v = new T.Vector3(), scale = bodyScale * vrm.humanoid.getNormalizedBoneNode('hips')!.getWorldPosition(v).y / pelvis.getWorldPosition(v).y;
   const mixer = new T.AnimationMixer(vrm.scene);
   const [idle, walk, run] = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop'].map(name =>
     mixer.clipAction(retarget(motion.animations.find(clip => clip.name === name)!, rig, vrm, scale)).play());
+  idle.time = phase % idle.getClip().duration;
   if (vrm.lookAt) vrm.lookAt.target = camera;
   const group = new T.Group().add(vrm.scene), face = vrm.expressionManager;
-  let time = 0, blinkAt = 1.5, smileAt = 3, first = true;
+  group.name = outfit.name;
+  let time = phase, blinkAt = phase + 1.5 + phase * 0.3, smileAt = 3, first = true;
   return { group, update(speed: number, dt: number) {
     const moving = Math.min(speed / 0.6, 1), running = T.MathUtils.clamp((speed - WALK) / (RUN - WALK), 0, 1);
     idle.weight = 1 - moving;
     walk.weight = moving * (1 - running);
     run.weight = moving * running;
-    walk.timeScale = T.MathUtils.clamp(speed / 1.4, 0.6, 1.5);
-    run.timeScale = T.MathUtils.clamp(speed / 3.8, 0.8, 1.2);
+    walk.timeScale = T.MathUtils.clamp(speed / 1.4, 0.6, 1.5) / bodyScale;
+    run.timeScale = T.MathUtils.clamp(speed / 3.8, 0.8, 1.2) / bodyScale;
     mixer.update(dt);
     time += dt;
     if (time > blinkAt + 0.16) blinkAt = time + 1.5 + Math.random() * 3.5;
@@ -77,7 +76,7 @@ export async function loadAvatar(camera: T.Camera) {
     const smile = T.MathUtils.smoothstep(time, smileAt, smileAt + 0.4) * (1 - T.MathUtils.smoothstep(time, smileAt + 2.2, smileAt + 2.6));
     face?.setValue('happy', 0.65 * smile);
     face?.setValue('blink', Math.max(0, 1 - Math.abs(time - blinkAt - 0.08) / 0.08) * (1 - smile));
-    if (first) { group.updateMatrixWorld(true); vrm.springBoneManager?.reset(); } // spawned away from the origin
+    if (first) { vrm.humanoid.update(); group.updateMatrixWorld(true); vrm.springBoneManager?.reset(); }
     first = false;
     vrm.update(dt);
   } };

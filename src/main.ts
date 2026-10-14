@@ -11,6 +11,7 @@ import { CheapBloom } from './render/cheapBloom';
 import { duskLUT } from './render/duskLUT';
 import { loadCharacter } from './player/character';
 import { loadAvatar } from './anime/avatar';
+import { outfits } from './anime/wardrobe';
 import { cloudCards } from './anime/clouds';
 import { playerControls } from './player/controls';
 import { followPlayer } from './player/player';
@@ -21,6 +22,7 @@ import { paint } from './scene/props';
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
 const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
+const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 1;
 const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
 // Phone measurement switches (?debug=1 shows fps, render height, draw calls, triangles):
 // msaa=0|4, bloom=0|1, lut=0|1, shadow=off|static|dynamic, dpr=<fixed pixel ratio>.
@@ -42,12 +44,24 @@ if (look === 'b' && !post) { // no post passes: the same Reinhard curve and expo
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera) : loadCharacter()]);
+const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera, sd) : loadCharacter()]);
+const cast: Awaited<ReturnType<typeof loadAvatar>>[] = [];
+if (anime && query.get('cast') === '1') {
+  // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
+  for (let i = 1; i < outfits.length; i++) cast.push(await loadAvatar(camera, sd, outfits[i], i * 0.47));
+}
 applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6);
 if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
 character.group.position.set(-7, 0, -6);
 scene.add(character.group);
+cast.forEach((person, i) => {
+  const across = [-2.5, -1.25, 1.25, 2.5, 3.75][i];
+  person.group.position.set(-7 + across * Math.SQRT1_2 - 0.5, 0, -6 - across * Math.SQRT1_2 - 0.5);
+  person.group.position.y = Math.abs(person.group.position.x) > 5 && Math.abs(person.group.position.z) > 5 ? 0.11 : 0;
+  person.group.rotation.y = Math.PI / 4;
+  scene.add(person.group);
+});
 // A static shadow map cannot follow the player: a soft contact blob grounds them instead.
 const blob = shadow === 'dynamic' ? undefined : new T.Mesh(new T.PlaneGeometry(1.1, 1.1).rotateX(-Math.PI / 2),
   new T.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.5, depthWrite: false,
@@ -60,6 +74,11 @@ if (blob) {
   character.group.traverse(object => { object.castShadow = false; });
   scene.add(blob);
 }
+if (blob) cast.forEach(person => {
+  const contact = blob.clone();
+  contact.position.copy(person.group.position).setY(person.group.position.y + 0.02);
+  scene.add(contact);
+});
 const ui = hud();
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
@@ -153,6 +172,7 @@ renderer.setAnimationLoop(now => {
   resolution.sample(dt); previous = now;
   status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : controls.stickInput(), controls.state);
   character.update(status.speed, Math.min(dt, 0.1));
+  cast.forEach(person => person.update(0, Math.min(dt, 0.1)));
   ui.door(status.near);
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);
@@ -164,6 +184,7 @@ renderer.setAnimationLoop(now => {
 });
 // Read-only diagnostics for browser verification and tests/play.
 Object.assign(window, { cornerDiagnostics: () => ({ look, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
+  sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
   sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),

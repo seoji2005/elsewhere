@@ -55,6 +55,11 @@
       "k-furniture-kit/Models/GLTF format/pottedPlant.glb"
     ]
   },
+  "shino": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/sendagaya_shino",
+    "files": ["Sendagaya Shino.vrm"],
+    "maxTexture": 1024
+  },
   "avatar": {
     "directory": "/home/dev/asset-packs/vroid-cc0/avatarsample_f",
     "files": [
