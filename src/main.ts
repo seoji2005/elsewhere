@@ -5,19 +5,28 @@ import { applyLook } from './scene/looks';
 import { cornerLighting } from './render/lighting';
 import { cornerAtmosphere } from './render/atmosphere';
 import { adaptiveResolution } from './render/resolution';
+import { loadCharacter } from './player/character';
+import { playerControls } from './player/controls';
+import { followPlayer } from './player/player';
+import { hud } from './ui/hud';
 
-const look = new URLSearchParams(location.search).get('look') === 'b' ? 'b' : 'a';
+const look = new URLSearchParams(location.search).get('look') === 'a' ? 'a' : 'b';
 const scene = new T.Scene();
-const camera = new T.PerspectiveCamera(32, 1, 0.1, 400);
-const focus = new T.Vector3(-9, 5.8, -9);
+const camera = new T.PerspectiveCamera(50, 1, 0.1, 400);
 const renderer = new T.WebGLRenderer({ antialias: true });
 renderer.toneMapping = T.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-await buildCorner(scene);
+const [world, character] = await Promise.all([buildCorner(scene), loadCharacter()]);
 applyLook(scene, look);
+// Added after the look pass so look A/B never retints the player.
+character.group.position.set(-7, 0, -6);
+scene.add(character.group);
+const ui = hud();
+const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
+const follow = followPlayer(character.group, camera, world);
 const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 55, 1024);
 lighting.fill.intensity = look === 'a' ? 0.85 : 1.05;
 const horizon = look === 'a' ? '#d9b499' : '#c6b5b2';
@@ -44,21 +53,26 @@ if (look === 'a') {
 const resolution = adaptiveResolution(renderer);
 function resize() {
   camera.aspect = innerWidth / innerHeight;
-  camera.position.set(12, 9, 16);
-  camera.fov = camera.aspect < 1 ? 60 : 32;
-  sky.position.copy(camera.position);
-  camera.lookAt(focus); camera.updateProjectionMatrix();
+  camera.fov = camera.aspect < 1 ? 70 : 50;
+  camera.updateProjectionMatrix();
   resolution.resize(innerWidth, innerHeight);
 }
 window.addEventListener('resize', resize);
 resize();
-let previous = performance.now();
+let previous = performance.now(), status = { speed: 0, near: false };
 renderer.setAnimationLoop(now => {
-  resolution.sample((now - previous) / 1000); previous = now;
+  const dt = (now - previous) / 1000;
+  resolution.sample(dt); previous = now;
+  status = follow(Math.min(dt, 0.1), controls.stickInput(), controls.state);
+  character.update(status.speed, Math.min(dt, 0.1));
+  ui.door(status.near);
+  sky.position.copy(camera.position);
   renderer.render(scene, camera);
+  if (!renderer.domElement.dataset.ready) ui.ready();
   renderer.domElement.dataset.ready = 'true';
 });
-// Read-only diagnostics for browser verification; no in-game UI.
+// Read-only diagnostics for browser verification and tests/play.
 Object.assign(window, { cornerDiagnostics: () => ({ look, ...renderer.info.render,
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow: 1024, camera: camera.position.toArray(),
-  sunElevation: 11, cornerDistance: Math.hypot(camera.position.x, camera.position.z) }) });
+  sunElevation: 11, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
+  player: character.group.position.toArray(), ...status }) });

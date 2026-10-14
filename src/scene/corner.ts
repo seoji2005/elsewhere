@@ -23,6 +23,19 @@ export async function buildCorner(scene: T.Scene) {
     scene.add(wrapper);
     return wrapper;
   }
+  // Movement colliders (XZ boxes), camera blockers and door trigger points.
+  const solids: T.Box3[] = [], walls: T.Box3[] = [], doors: T.Vector3[] = [];
+  const doorShift: Record<string, number> = { Building_Small_1: 0.08 }; // door centre, fraction of façade width
+  function building(wrapper: T.Group, type: string) {
+    const box = new T.Box3().setFromObject(wrapper), size = box.getSize(new T.Vector3());
+    const r = wrapper.rotation.y, front = new T.Vector3(Math.sin(r), 0, Math.cos(r));
+    const right = new T.Vector3(front.z, 0, -front.x), extent = (axis: T.Vector3) =>
+      Math.abs(axis.x) * size.x + Math.abs(axis.z) * size.z;
+    doors.push(box.getCenter(new T.Vector3()).setY(0).addScaledVector(front, extent(front) / 2 + 0.5)
+      .addScaledVector(right, extent(right) * (doorShift[type] ?? 0)));
+    walls.push(box); solids.push(box);
+    return wrapper;
+  }
   const asphalt = new T.MeshStandardMaterial({ color: '#414750', roughness: 0.96 });
   const paving = new T.MeshStandardMaterial({ color: '#b8b2a4', roughness: 0.9 });
   const paint = new T.MeshStandardMaterial({ color: '#e1d8be', roughness: 0.85 });
@@ -35,9 +48,9 @@ export async function buildCorner(scene: T.Scene) {
   // Continuous sidewalks border two ten-metre streets; façades abut the paving.
   for (const x of [-54, 54]) for (const z of [-54, 54])
     slab(98, 0.22, 98, x, 0, z, paving, 'curb');
-  place(city.scene, 'Building_Small_1', -10.5, -11, 8, 0, 0.11);
-  place(city.scene, 'Building_Medium_2_001', -19.1, -11, 9, 0, 0.11);
-  place(city.scene, 'Building_Large_2', -10, -22, 8, Math.PI / 2, 0.11);
+  building(place(city.scene, 'Building_Small_1', -10.5, -11, 8, 0, 0.11), 'Building_Small_1');
+  building(place(city.scene, 'Building_Medium_2_001', -19.1, -11, 9, 0, 0.11), 'Building_Medium_2_001');
+  building(place(city.scene, 'Building_Large_2', -10, -22, 8, Math.PI / 2, 0.11), 'Building_Large_2');
   const types = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
   const background = new T.Group();
   scene.add(background);
@@ -49,8 +62,8 @@ export async function buildCorner(scene: T.Scene) {
     [1, -29, 11, Math.PI], [0, -40, 11, Math.PI],
     [2, -52, -11, 0], [0, -10, -47, Math.PI / 2],
   ]) {
-    const building = place(city.scene, types[i], x, z, 9, rotation, 0.11);
-    building.traverse(child => {
+    const tinted = building(place(city.scene, types[i], x, z, 9, rotation, 0.11), types[i]);
+    tinted.traverse(child => {
       if (!(child instanceof T.Mesh)) return;
       const vary = (material: T.Material) => {
         if (!(material instanceof T.MeshStandardMaterial) || !/brick/i.test(material.name)) return material;
@@ -60,7 +73,7 @@ export async function buildCorner(scene: T.Scene) {
       };
       child.material = Array.isArray(child.material) ? child.material.map(vary) : vary(child.material);
     });
-    background.add(building);
+    background.add(tinted);
   }
   for (const z of [-6.6, 6.6]) for (let i = 0; i < 7; i++)
     slab(0.65, 0.025, 2.5, -3.3 + i * 1.1, 0.025, z, paint, 'crosswalk');
@@ -71,17 +84,18 @@ export async function buildCorner(scene: T.Scene) {
     slab(0.12, 0.025, 2.5, 0, 0.025, z, paint, 'lane paint');
   }
   for (const [x, z] of [[-6, -7.5], [-15, -5.9], [-25, -5.9]]) {
-    place(city.scene, 'Prop_Planter_Single', x, z, 1.2, 0, 0.11);
+    solids.push(new T.Box3().setFromObject(place(city.scene, 'Prop_Planter_Single', x, z, 1.2, 0, 0.11)));
     place(nature.scene, 'CommonTree_1', x, z, 3.2, 0, 0.65);
   }
   for (const x of [-8, -11, -18, -21])
-    place(city.scene, 'Prop_Bollard', x, -5.4, undefined, 0, 0.11);
-  place(cars.scene, 'sedan', -11, -3.4, 1.8, Math.PI / 2);
-  place(cars.scene, 'van', -20, -3.4, 1.9, Math.PI / 2);
+    solids.push(new T.Box3().setFromObject(place(city.scene, 'Prop_Bollard', x, -5.4, undefined, 0, 0.11)));
+  solids.push(new T.Box3().setFromObject(place(cars.scene, 'sedan', -11, -3.4, 1.8, Math.PI / 2)),
+    new T.Box3().setFromObject(place(cars.scene, 'van', -20, -3.4, 1.9, Math.PI / 2)));
   scene.traverse(object => {
     if (object instanceof T.Mesh) {
       object.castShadow = !/asphalt|crosswalk|lane paint/.test(object.name);
       object.receiveShadow = true;
     }
   });
+  return { solids, walls, doors };
 }

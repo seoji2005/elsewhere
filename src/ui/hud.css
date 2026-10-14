@@ -1,0 +1,25 @@
+body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.stick {
+  position: fixed; left: calc(env(safe-area-inset-left) + 92px); bottom: 28px; width: 112px; height: 112px;
+  margin: -56px 0 0 -56px; border-radius: 50%; pointer-events: none;
+  background: rgba(20, 24, 32, 0.22); border: 2px solid rgba(255, 255, 255, 0.45);
+}
+.stick:not(.active) { opacity: 0.55; }
+.knob {
+  position: absolute; left: 30px; top: 30px; width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.stick.run .knob { background: #ffc178; }
+.enter {
+  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 14px); transform: translateX(-50%);
+  min-width: 132px; height: 56px; padding: 0 26px; border: 0; border-radius: 28px;
+  background: rgba(255, 193, 120, 0.94); color: #2b2018; font: 700 19px system-ui, sans-serif;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+.enter:active { transform: translateX(-50%) scale(0.95); }
+.toast {
+  position: fixed; left: 50%; top: 16px; transform: translateX(-50%); padding: 9px 18px; border-radius: 18px;
+  background: rgba(20, 24, 32, 0.78); color: #fff; font: 600 15px system-ui, sans-serif;
+  opacity: 0; transition: opacity 0.25s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
