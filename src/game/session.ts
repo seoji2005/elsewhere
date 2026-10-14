@@ -22,6 +22,7 @@ import { jobs } from '../data/jobs';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60;
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
+const businessProducerJobs: Readonly<Record<string, string>> = { ...producerJobs, lamp: '빛씨 조율사' };
 const personalEmployer: Record<string, string> = { cafe: 'nuel', shop: 'sori', market: 'aro' };
 function createEconomy(world: ReturnType<typeof createWorld>) {
   const { people, ledger } = world, now = gameTime(world.clock);
@@ -56,14 +57,18 @@ function addResidents(state: ReturnType<typeof freshState>, allocate = false, op
   }
   if (open) {
     state.populationEconomy = true; book.businesses = []; book.employment = [];
+  }
+  if (open || state.populationEconomy) {
     for (const [id, ownerId, placeId, itemId, price, capacity] of [
       ['tea-counter', 'nuel', 'cafe', 'tea', 8, 1],
       ['exchange-counter', 'sori', 'shop', 'scarf', 25, 2],
       ['garden-counter', 'iri', 'park', 'soup', 15, 1],
+      ['light-counter', 'aro', 'office', 'lamp', 30, 1],
     ] as const) {
+      if (!open && (id !== 'light-counter' || book.businesses.some(b => b.id === id || b.ownerId === ownerId))) continue;
       openBusiness(book, world.people, world.ledger, id, ownerId, placeId, capacity,
         [{ itemId, backroom: 0, displayed: 0, capacity: 5, price }], now);
-      for (const n of residents.filter(n => n.job === producerJobs[itemId] && n.id !== ownerId).slice(0, capacity))
+      for (const n of residents.filter(n => n.job === businessProducerJobs[itemId] && n.id !== ownerId).slice(0, capacity))
         hire(book, world.people, world.ledger, id, n.id, { id: `${id}-helper`, name: n.job,
           employerId: ownerId, placeId, fromMinute: 0, toMinute: 1440, durationMinutes: 60, hourlyWage: 4 }, now);
     }
@@ -325,8 +330,13 @@ export function createSession(storage: Storage, npcSeed?: number) {
                 funds(world.ledger, purses[npc.id]).spendable < stock.price ||
                 dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
             if (stock.backroom + stock.displayed === 0) {
-              const producer = residents.find(n => n.id !== b.ownerId && n.job === producerJobs[stock.itemId]);
-              if (producer) procure(book, world.people, world.ledger, b.id, producer, stock.itemId, 5,
+              const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
+              if (producer && stock.itemId === 'lamp') {
+                const result = payPerson(world.people, world.ledger, { id: `supply:${visitId}`, from: b.ownerId,
+                  to: producer.id, amount: 5 * Math.max(1, Math.floor(stock.price / 4)), time: now,
+                  reason: `Procurement: ${b.id}:lamp:5:${Math.max(1, Math.floor(stock.price / 4))}` });
+                if (result.ok && !result.duplicate) stock.backroom += 5;
+              } else if (producer) procure(book, world.people, world.ledger, b.id, producer, stock.itemId, 5,
                 Math.max(1, Math.floor(stock.price / 4)), `supply:${visitId}`, now);
             }
             restock(b.store, stock.itemId, 5);
@@ -351,6 +361,10 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (minute % 1440 === 0) {
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         advanceDay(state.market); state.settledDay = now.day - 1;
+        const cutoff = minute - 14 * 1440;
+        state.work.shifts = state.work.shifts.filter(s => !s.paid || s.endsAt >= cutoff);
+        for (const store of [state.store, ...book.businesses.map(b => b.store)])
+          store.visits = store.visits.filter(v => v.status === 'waiting' || v.joinedMinute >= cutoff);
       }
       expireVisits(state.store, now);
       for (const appointment of state.matchmaking.appointments) {
