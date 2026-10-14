@@ -44,3 +44,4 @@
 7. 경제 2단계(생성 주민 50명·가게 여러 곳, R015)
 사용자 확인 대기:
 - C023b SD·생활복 캐릭터: https://3-34-132-123.sslip.io/sd-cast.html?cast=1&debug=1 (sd=0|1|2 비교, 브랜치 cl/c023)
+- 2026-10-14 밤 · cards/MASTER_FEEDBACK.md를 읽고 마스터가 직접 판단해 C033~C037 작업 카드 실행 및 features.json(proposed) 반영할 것 · 사용자
