@@ -80,8 +80,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   };
   const scores = (npc: Npc) => `호감 ${Math.round(incoming(npc).affection)} · 신뢰 ${Math.round(incoming(npc).trust)}`;
   const feeling = (npc: Npc) => {
-    const romance = readBond(state.bonds, 'player', npc.id).romance;
-    return romance >= 60 ? 'love' : romance >= 40 ? 'crush' : 'friend';
+    const { romance, affection } = readBond(state.bonds, 'player', npc.id);
+    return romance >= 60 ? 'love' : romance >= 40 ? 'crush' : affection >= 30 ? 'friend' : 'unset';
   };
   const owned = () => items.filter(item => (state.shop.residents.player?.inventory[item.id] ?? 0) > 0);
   // Every action re-renders; a returned string is toasted, a thrown sim error becomes a short Korean reason.
@@ -158,7 +158,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     live(make('hud-sub hud-bond', body), () => scores(npc));
     make('hud-say', body, 'div', said);
     const feelings = make('hud-chips', body);
-    live(make('hud-sub', feelings, 'span'), () => `내 마음 · ${ { friend: '친구', crush: '호감', love: '사랑' }[feeling(npc)]}`);
+    live(make('hud-sub', feelings, 'span'), () => `내 마음 · ${ { unset: '아직 정하지 않음', friend: '친구', crush: '호감', love: '사랑' }[feeling(npc)]}`);
     for (const [id, label] of [['friend', '친구'], ['crush', '호감'], ['love', '사랑']] as const) {
       const choice = button(feelings, label, () => session.setFeeling(npc.id, id) ? undefined : '지금은 마음을 바꿀 수 없어요');
       const update = () => {
