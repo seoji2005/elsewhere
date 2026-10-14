@@ -8,7 +8,7 @@ import { whereIs } from '../../src/sim/npc';
 import { npcs } from '../../src/data/npcs';
 import { gameTime } from '../../src/sim/clock';
 import { generate } from '../../src/sim/npcgen';
-import { applyBondEvent, edgeKey, readBond } from '../../src/sim/bonds';
+import { applyBondEvent, edgeKey, emptyBond, readBond } from '../../src/sim/bonds';
 import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
 import { buildDialogue } from '../../src/sim/dialogue';
 import { hire, openBusiness, startEmployeeShift } from '../../src/sim/business';
@@ -326,6 +326,9 @@ it('connects generated dialogue, gifts, dating, introductions and public notices
   expect(() => session.giveGift('gift', npc.id, 'scarf')).toThrow();
   expect(state.shop.residents.player.inventory.scarf).toBe(0);
   state.world.relationships.player[npc.id] = 90;
+  // bonds mode: both directions must meet the dating thresholds (C040), not only the legacy score.
+  const ready = { ...emptyBond(), affection: 60, trust: 40, respect: 10, comfort: 30, romance: 70, met: true };
+  state.bonds.edges[edgeKey('player', npc.id)] = { ...ready }; state.bonds.edges[edgeKey(npc.id, 'player')] = { ...ready };
   expect(session.confess('dating', npc.id, { playerWantsDating: true, npcWantsDating: true }).accepted).toBe(true);
   expect(state.ripple.notices.some(n => n.observerId === observer.id && n.eventId === 'gift')).toBe(true);
   expect(state.ripple.notices.some(n => n.observerId === observer.id && n.kind === 'dating')).toBe(true);
@@ -411,4 +414,77 @@ it('applies light revenue growth to its price exactly once at midnight', () => {
   advanceDay(expected); advanceDay(baseline); session.tick(1);
   expect(session.state.market).toEqual(expected); expect(expected.prices.light).not.toBe(baseline.prices.light);
   session.tick(0); session.saveNow(); expect(session.state.market).toEqual(expected);
+});
+
+it('applies ten chats and a gift once to the receiving bond, including after reload', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session;
+  expect(session.buildDialogue('lise').stage).toBe('낯섦');
+  for (let i = 0; i < 10; i++) session.talk(`bond-chat:${i}`, 'lise', session.buildDialogue('lise').choices[0]);
+  expect(readBond(state.bonds, 'lise', 'player')).toMatchObject({ affection: 7, comfort: 3, trust: 0, respect: 0, romance: 0, met: true });
+  expect(readBond(state.bonds, 'player', 'lise').affection).toBe(0);
+  expect(state.world.relationships.player.lise).toBe(10);
+  expect(session.buildDialogue('lise').stage).toBe('아는 사이');
+  state.shop.residents.player = { inventory: { bread: 2 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+  session.tick(1440); const gift = session.giveGift('bond-gift', 'lise', 'bread');
+  expect(readBond(state.bonds, 'lise', 'player').affection).toBeCloseTo(7 + gift.entry.change * .7);
+  session.saveNow(); const next = createSession(storage);
+  const liseChoice = next.buildDialogue('lise').choices[0], aroChoice = next.buildDialogue('aro').choices[0];
+  const before = structuredClone(next.state);
+  expect(() => next.talk('bond-chat:0', 'lise', liseChoice)).toThrow();
+  expect(() => next.talk('bond-chat:0', 'aro', aroChoice)).toThrow();
+  expect(() => next.giveGift('bond-gift', 'lise', 'bread')).toThrow();
+  expect(next.state).toEqual(before);
+  expect(state.bonds.applied.filter(id => id === 'bond-gift')).toHaveLength(1);
+});
+it('requires both bonds and both consents for dating, independently of legacy scores', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  const ready = { affection: 40, trust: 25, respect: 0, comfort: 20, romance: 60, met: true };
+  const consent = { playerWantsDating: true, npcWantsDating: true };
+  state.world.relationships.player = { lise: 90 };
+  state.bonds.edges[edgeKey('lise', 'player')] = { ...ready };
+  expect(session.confess('one-sided', 'lise', consent).accepted).toBe(false);
+  state.bonds.edges[edgeKey('player', 'lise')] = { ...ready };
+  expect(session.confess('no-consent', 'lise', { ...consent, npcWantsDating: false }).accepted).toBe(false);
+  expect(state.dialogue.dating).toEqual([]); state.world.relationships.player.lise = 0;
+  expect(session.confess('mutual', 'lise', consent).accepted).toBe(true);
+  expect(session.buildDialogue('lise').stage).toBe('연인 첫 단계');
+});
+it('uses the introducer bond and known acquaintances instead of legacy introduction scores', () => {
+  const session = createSession(memory(), 123), { state } = session, candidate = generate(123, 50)[0];
+  const time = { day: 1, hour: 12, minute: 0 };
+  const request = { id: 'not-friends', player: { id: 'player', traits: candidate.traits, likes: candidate.likes, dislikes: [], reputation: 0 },
+    introducerId: 'aro', npcs: [npcs[0], candidate], now: gameTime(state.world.clock),
+    slot: { placeId: whereIs(candidate, time), time }, appearances: { [candidate.id]: candidate.appearance } };
+  state.world.relationships.player = { aro: 90 };
+  expect(session.requestMatch(request)).toBeNull();
+  state.bonds.edges[edgeKey('aro', 'player')] = { affection: 30, trust: 15, respect: 0, comfort: 10, romance: 0, met: true };
+  state.bonds.edges[edgeKey('aro', candidate.id)] = { affection: 0, trust: 0, respect: 0, comfort: 0, romance: 0, met: true };
+  state.world.relationships.player.aro = 0; state.world.relationships.aro[candidate.id] = 0;
+  expect(session.requestMatch({ ...request, id: 'bond-friends' })?.npcId).toBe(candidate.id);
+  expect(state.world.relationships.player.aro).toBe(0); expect(state.world.relationships.aro[candidate.id]).toBe(0);
+});
+it('keeps legacy dialogue, gifts and dating unchanged after restoring an old save', () => {
+  const storage = memory(), initial = createSession(storage, 123); initial.saveNow();
+  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); saved.version = 2;
+  storage.setItem(SESSION_KEY, JSON.stringify(saved)); const session = createSession(storage), { state } = session;
+  expect(state.relationMode).toBe('legacy');
+  session.talk('legacy-chat', 'lise', session.buildDialogue('lise').choices[0]);
+  state.shop.residents.player = { inventory: { bread: 1 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+  session.giveGift('legacy-gift', 'lise', 'bread'); expect(state.world.relationships.player.lise).toBe(10);
+  expect(readBond(state.bonds, 'lise', 'player').affection).toBe(0);
+  expect(session.buildDialogue('lise').stage).toBe('아는 사이'); state.world.relationships.player.lise = 90;
+  expect(session.confess('legacy-date', 'lise', { playerWantsDating: true, npcWantsDating: true }).accepted).toBe(true);
+});
+it.each([1, 31])('chooses preferred stock after the first slot and respects catalog tolerance: price %i', price => {
+  const prepare = () => {
+    const session = createSession(memory(), 123), store = session.state.book.businesses[0]; store.placeId = 'office';
+    store.store.stock = [{ itemId: 'tea', backroom: 10, displayed: 5, capacity: 5, price: 1 },
+      { itemId: 'lamp', backroom: 10, displayed: 5, capacity: 5, price }];
+    return session;
+  };
+  const session = prepare(), repeated = prepare(); session.tick(360); repeated.tick(360);
+  expect(session.state).toEqual(repeated.state);
+  const purchases = session.state.book.businesses[0].store.events.filter(e => e.actorId === 'aro' && e.reason === 'purchased');
+  expect(purchases.map(e => e.itemId)).toEqual(price === 1 ? ['lamp'] : []);
+  expect(Object.values(session.state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
 });
