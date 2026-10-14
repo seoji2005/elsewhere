@@ -3,7 +3,7 @@ import { createSession, SESSION_KEY, AUTOSAVE_MINUTES } from '../../src/game/ses
 import type { Storage } from '../../src/game/storage';
 import { saveWorld } from '../../src/sim/save';
 import { createWorld } from '../../src/sim/world';
-import { advanceDay, applyEvent, recordNpcRevenue } from '../../src/sim/market';
+import { advanceDay, applyEvent, recordNpcRevenue, trade } from '../../src/sim/market';
 import { whereIs } from '../../src/sim/npc';
 import { npcs } from '../../src/data/npcs';
 import { gameTime } from '../../src/sim/clock';
@@ -13,7 +13,7 @@ import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
 import { buildDialogue } from '../../src/sim/dialogue';
 import { hire, openBusiness, startEmployeeShift } from '../../src/sim/business';
 import { jobs } from '../../src/data/jobs';
-import { visitStore } from '../../src/sim/store';
+import { dailySummary, visitStore } from '../../src/sim/store';
 import { useItem } from '../../src/sim/shop';
 import { checkoutBusiness, producerJobs, revenueChange } from '../../src/sim/business';
 import { createPurse, dayCashflow } from '../../src/sim/purse';
@@ -23,6 +23,64 @@ function memory(): Storage & { values: Map<string, string> } {
   const values = new Map<string, string>();
   return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => { values.set(key, value); } };
 }
+it('C050: completed exchange arrears allow cafe work and remain payable later', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  session.tick(1440 + 480);
+  for (let day = 2; day <= 3; day++) {
+    state.player.placeId = 'shop';
+    for (let i = 0; i < 5; i++) { expect(session.startWork('exchange-helper').ok).toBe(true); session.tick(120); }
+    if (day === 2) { state.player.placeId = 'nest'; session.tick(840); }
+  }
+  const arrears = state.work.shifts.find(s => s.actorId === 'player' && !s.paid)!;
+  expect(arrears).toMatchObject({ wage: 80, paid: false }); expect(state.world.ledger.balances.sori).toBe(44);
+  state.player.placeId = 'cafe'; expect(session.startWork('tea-helper').ok).toBe(true);
+  expect(session.startWork('tea-helper').ok).toBe(false); expect(arrears.paid).toBe(false);
+  transfer(state.world.ledger, { id: 'fund-arrears', from: 'player', to: 'sori', amount: 80,
+    time: gameTime(state.world.clock), reason: 'Transfer' });
+  session.tick(1); expect(arrears.paid).toBe(true);
+});
+it.each([[720, 0], [779.25, .5], [779.25, .75]])('C050: arrival %s, tick %s records both bonds without no-shows', (arrival, elapsed) => {
+  const session = createSession(memory(), 123), { state } = session, npc = generate(123, 50)[0];
+  const date: typeof state.matchmaking.appointments[number] = { id: 'date', actorId: 'player', introducerId: 'aro',
+    npcId: 'generated-123-0', placeId: 'cafe', time: { day: 1, hour: 12, minute: 0 },
+    impression: { name: npc.name, appearance: npc.appearance, keywords: npc.traits, note: '' },
+    playerInterest: 2, npcInterest: 2, status: 'scheduled', noShowBy: [] };
+  state.matchmaking.appointments.push(date);
+  if (arrival === 720) { state.player.placeId = 'cafe'; session.tick(720); }
+  else { session.tick(779.25); state.player.placeId = 'cafe'; session.tick(elapsed); }
+  expect(date.status).toBe('met'); expect(date.noShowBy).toEqual([]);
+  expect(state.encounters.met).toContainEqual({ actorId: 'player', npcId: npc.id, day: 1 });
+  for (const [a, b] of [['player', npc.id], [npc.id, 'player']]) expect(readBond(state.bonds, a, b)).toEqual({ ...emptyBond(), met: true });
+  expect(session.buildDialogue(npc.id).stage).toBe('아는 사이');
+  const bonds = structuredClone(state.bonds); session.tick(.25); expect(date.status).toBe('met');
+  expect(date.noShowBy).toEqual([]); expect(state.bonds).toEqual(bonds);
+});
+it('C050: retry-buy after 16 days leaves money and holdings unchanged', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  const order = { id: 'retry-buy', account: 'player', companyId: 'tea', quantity: 1, side: 'buy' as const };
+  const buy = () => trade(state.market, state.world.ledger, { ...order, time: gameTime(state.world.clock) }, 'aro');
+  expect(buy()).toEqual({ ok: true, duplicate: false }); expect(state.world.ledger.balances.player).toBe(19);
+  session.tick(16 * 1440); expect(state.world.ledger.transactions.some(t => t.id === order.id)).toBe(false);
+  const before = structuredClone({ market: state.market, balances: state.world.ledger.balances });
+  expect(buy()).toEqual({ ok: true, duplicate: true });
+  expect({ market: state.market, balances: state.world.ledger.balances }).toEqual(before);
+});
+it('C050: retry-visit after 16 days leaves stock and daily revenue unchanged', () => {
+  const session = createSession(memory(), 123), { state } = session, { world, book, purses } = state;
+  const store = book.businesses.find(b => b.id === 'tea-counter')!.store;
+  const buy = () => {
+    const time = gameTime(world.clock);
+    visitStore(store, world.ledger, 'retry-visit', 'player', { itemId: 'tea', maxPrice: 8 }, 1, time);
+    return checkoutBusiness(book, world.people, world.ledger, 'tea-counter', purses.player, 'retry-visit', time);
+  };
+  expect(buy()).toEqual({ ok: true, duplicate: false }); expect(world.ledger.balances.player).toBe(92);
+  session.tick(16 * 1440); expect(store.visits.some(v => v.id === 'retry-visit')).toBe(false);
+  const before = structuredClone({ stock: store.stock, events: store.events, balances: world.ledger.balances });
+  const revenue = dailySummary(store, 17).revenue;
+  expect(buy()).toEqual({ ok: true, duplicate: true }); expect(buy()).toEqual({ ok: true, duplicate: true });
+  expect({ stock: store.stock, events: store.events, balances: world.ledger.balances }).toEqual(before);
+  expect(dailySummary(store, 17).revenue).toBe(revenue);
+});
 // Original C031 v4 fixture: keep regression assertions against its seven funded wallets and contracts.
 function legacySession(storage: Storage) {
   const session = createSession(storage, 123), { state } = session, { world, book } = state;

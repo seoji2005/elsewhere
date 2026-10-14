@@ -16,6 +16,7 @@ import { createShopState, useItem, giveGift } from '../sim/shop';
 import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
 import { createMatchmakingState, resolveMatch, requestMatch, type MatchRequest } from '../sim/matchmaking';
+import { minuteOf } from '../sim/memory';
 import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly } from '../sim/bonds';
 import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
 import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '../sim/ripple';
@@ -362,9 +363,24 @@ export function createSession(storage: Storage, npcSeed?: number) {
       state.player.placeId, gameTime(state.world.clock)) }; }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : String(error) }; }
   };
+  const resolveMatches = (now: ReturnType<typeof gameTime>) => {
+    for (const appointment of state.matchmaking.appointments) {
+      if (!['scheduled', 'offered'].includes(appointment.status) || minuteOf(appointment.time) > minuteOf(now)) continue;
+      const npc = residents.find(n => n.id === appointment.npcId);
+      if (npc && resolveMatch(appointment, state.encounters, npc, now,
+        { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) }) === 'met') {
+        applyBondEvent(state.bonds, `match-met:${appointment.id}`, now, [
+          { fromId: appointment.actorId, toId: npc.id, delta: {}, met: true },
+          { fromId: npc.id, toId: appointment.actorId, delta: {}, met: true },
+        ]);
+      }
+    }
+  };
   const tick = (realSeconds: number): SaveResult | undefined => {
+    const before = gameTime(state.world.clock);
     const days = advanceClock(state.world.clock, realSeconds);
     const target = state.world.clock.totalMinutes, { world, book, purses } = state;
+    resolveMatches(before);
     for (let minute = state.economyMinute + 1; minute <= Math.floor(target); minute++) {
       world.clock.totalMinutes = minute;
       const now = gameTime(world.clock);
@@ -460,16 +476,12 @@ export function createSession(storage: Storage, npcSeed?: number) {
         }
       }
       expireVisits(state.store, now);
-      for (const appointment of state.matchmaking.appointments) {
-        const npc = residents.find(n => n.id === appointment.npcId);
-        if (npc && (appointment.time.day - 1) * 1440 + appointment.time.hour * 60 + appointment.time.minute <= minute)
-          resolveMatch(appointment, state.encounters, npc, now,
-            { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) });
-      }
+      resolveMatches(now);
       state.economyMinute = minute;
     }
     state.world.clock.totalMinutes = target;
     const now = gameTime(state.world.clock);
+    resolveMatches(now);
     for (const npc of residents) if (state.world.people[npc.id]) state.world.people[npc.id].placeId = whereIs(npc, now);
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
