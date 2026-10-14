@@ -19,7 +19,7 @@ import type { createSession } from '../game/session';
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소' } as const;
 type Tab = keyof typeof tabs;
-const placeName = (id: string) => places.find(p => p.id === id)?.name ?? id;
+const placeName = (id: string) => places.find(p => p.id === id)?.name ?? (id === 'street' ? '거리' : id);
 const two = (n: number) => String(n).padStart(2, '0');
 const clock = (t: GameTime) => `${t.day}일째 ${two(t.hour)}:${two(t.minute)}`;
 const problems: Record<string, string> = {
@@ -29,7 +29,9 @@ const problems: Record<string, string> = {
 };
 
 // Thumb UI over the canvas: joystick ring, door button, toast, status bar and the 결폰 panel driving the session.
-export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]) {
+export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[], location: {
+  move: (placeId: string) => void; sync: () => void;
+}) {
   const { state } = session;
   const make = (className: string, parent: HTMLElement = document.body, tag = 'div', text = '') => {
     const element = document.createElement(tag);
@@ -88,6 +90,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const act = (action: () => string | void) => {
     try { const text = action(); if (text) say(text); }
     catch (error) { say(problems[(error as Error).message] ?? '지금은 할 수 없어요'); }
+    location.sync();
+    if (!session.saveNow().ok) say('저장하지 못했어요');
     render(true);
   };
   const button = (parent: HTMLElement, text: string, action: () => string | void, disabled: boolean | (() => boolean) = false) => {
@@ -107,10 +111,10 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const title = (text: string) => make('hud-title', body, 'div', text);
   const note = (text: string) => make('hud-note', body, 'div', text);
   function go(placeId: string) {
+    location.move(placeId);
     state.player.placeId = placeId;
     if (state.world.people.player) state.world.people.player.placeId = placeId;
     selected = '';
-    session.saveNow();
   }
   function show(next: Tab | '') {
     panel.hidden = !next;
@@ -131,8 +135,10 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   // Lines come from the session's social API (rumours, generated residents); any refusal shows a quiet fallback.
   const fallback = (npc: Npc) => `${npc.name} 님이 고개를 끄덕여요.`;
   const bond = (id: string, entry: Interaction) => applyBondEvent(state.bonds, id, entry.time, [reactionEffect(entry)]);
+  const appointments = () => state.matchmaking.appointments.filter(a => a.status === 'scheduled' || a.status === 'offered');
   const speak = (npc: Npc, line: () => string) => () => { try { said = line(); } catch { said = fallback(npc); } };
   function match(npc: Npc) {
+    if (appointments().length) return '아직 끝나지 않은 약속이 있어요';
     // The player profile is not stored yet: their interests are the topics they have chatted about happily.
     const likes = [...new Set(state.relationships.interactions
       .filter(i => i.actorId === 'player' && i.change > 0).map(i => i.choice.topic))];
@@ -197,15 +203,15 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     }));
     const more = make('hud-chips', body);
     button(more, '소개팅 부탁 (30+)', () => { said = match(npc); },
-      () => state.relationMode === 'bonds' ? !friendly(incoming(npc)) : value(npc) < 30);
+      () => appointments().length > 0 || (state.relationMode === 'bonds' ? !friendly(incoming(npc)) : value(npc) < 30));
+    live(make('hud-sub', more, 'span'), () => appointments().length ? '아직 끝나지 않은 약속이 있어요' : '친구가 되면 부탁할 수 있어요');
     button(more, '고백하기 (60+)', speak(npc, () => session.confess(uid('confess'), npc.id, { playerWantsDating: true,
       npcWantsDating: incoming(npc).affection >= 30 }).line), () => state.relationMode === 'bonds'
       ? !canStartDating(readBond(state.bonds, 'player', npc.id), incoming(npc),
         { playerWantsDating: true, npcWantsDating: incoming(npc).affection >= 30 }) : value(npc) < 60);
   }
   function people() {
-    const date = state.matchmaking.appointments.find(a => a.status === 'scheduled');
-    if (date) live(note(''), () => `약속 · ${date.impression.name} 님 · ${placeName(date.placeId)} ${clock(date.time)}`);
+    for (const date of appointments()) live(note(''), () => `약속 · ${date.impression.name} 님 · ${placeName(date.placeId)} ${clock(date.time)}`);
     const here = residents.filter(n => state.world.people[n.id]?.placeId === state.player.placeId);
     const npc = here.find(n => n.id === selected);
     if (npc) return person(npc);
@@ -276,7 +282,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     if (panel.hidden) return;
     const membership = tab === 'people'
       ? [residents.filter(n => state.world.people[n.id]?.placeId === state.player.placeId).map(n => n.id),
-        state.matchmaking.appointments.find(a => a.status === 'scheduled')?.id,
+        appointments().map(a => [a.id, a.status]),
         selected ? owned().map(i => i.id) : []]
       : tab === 'work'
         ? [state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null)
@@ -302,7 +308,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   return { stick, knob, say, ready: () => document.getElementById('loading')?.remove(),
     // ?phone=<tab>[,<placeId>] opens the panel (screenshots); door() gets the nearest door, or nothing.
     open(next: string, placeId?: string) {
-      if (placeId && places.some(p => p.id === placeId)) go(placeId);
+      if (placeId && places.some(p => p.id === placeId)) act(() => go(placeId));
       if (next in tabs) show(next as Tab);
     },
     door(next?: Door) {
