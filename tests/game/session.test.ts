@@ -8,7 +8,7 @@ import { whereIs } from '../../src/sim/npc';
 import { npcs } from '../../src/data/npcs';
 import { gameTime } from '../../src/sim/clock';
 import { generate } from '../../src/sim/npcgen';
-import { applyBondEvent, edgeKey, emptyBond, readBond } from '../../src/sim/bonds';
+import { applyBondEvent, edgeKey, emptyBond, readBond, canStartDating } from '../../src/sim/bonds';
 import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
 import { buildDialogue } from '../../src/sim/dialogue';
 import { hire, openBusiness, startEmployeeShift } from '../../src/sim/business';
@@ -50,7 +50,8 @@ it.each([[720, 0], [779.25, .5], [779.25, .75]])('C050: arrival %s, tick %s reco
   else { session.tick(779.25); state.player.placeId = 'cafe'; session.tick(elapsed); }
   expect(date.status).toBe('met'); expect(date.noShowBy).toEqual([]);
   expect(state.encounters.met).toContainEqual({ actorId: 'player', npcId: npc.id, day: 1 });
-  for (const [a, b] of [['player', npc.id], [npc.id, 'player']]) expect(readBond(state.bonds, a, b)).toEqual({ ...emptyBond(), met: true });
+  for (const [a, b] of [['player', npc.id], [npc.id, 'player']]) expect(readBond(state.bonds, a, b)).toEqual({ ...emptyBond(), met: true, trust: a === npc.id ? 3 : 0 });
+  expect(readBond(state.bonds, 'aro', 'player').trust).toBe(3);
   expect(session.buildDialogue(npc.id).stage).toBe('아는 사이');
   const bonds = structuredClone(state.bonds); session.tick(.25); expect(date.status).toBe('met');
   expect(date.noShowBy).toEqual([]); expect(state.bonds).toEqual(bonds);
@@ -671,3 +672,81 @@ it('compacts 180-day finances with exact totals, retries, stock prices and split
   expect(ledger.history!.ids.length).toBeLessThanOrEqual(50);
   expect(bytes).toBeLessThanOrEqual(159 * 1024); expect(bytes).toBeLessThan(withoutPruning);
 }, 15000);
+
+function buyHomeLamp(session: ReturnType<typeof createSession>) {
+  const { state } = session, b = state.book.businesses.find(b => b.id === 'light-counter')!, time = gameTime(state.world.clock);
+  visitStore(b.store, state.world.ledger, 'decor', 'player', { itemId: 'lamp', maxPrice: 30 }, 1, time);
+  expect(checkoutBusiness(state.book, state.world.people, state.world.ledger, b.id, state.purses.player, 'decor', time).ok).toBe(true);
+  state.shop.residents.player = { inventory: { lamp: 1 }, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+  useItem(state.shop, 'player', 'lamp');
+}
+it('C051: completed work rewards only its owner and overlapping coworkers once, even with unpaid wages', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session;
+  session.tick(420); state.player.placeId = 'cafe'; expect(session.startWork('tea-helper').ok).toBe(true);
+  state.world.ledger.balances.nuel = 0; session.tick(59);
+  expect(readBond(state.bonds, 'nuel', 'player').trust).toBe(0); session.tick(1);
+  for (const id of ['nuel', 'generated-123-0']) {
+    expect(readBond(state.bonds, id, 'player')).toMatchObject({ trust: 3, respect: 2, comfort: 2, met: true });
+    expect(state.dialogue.memories[id].entries.filter(m => m.kind === 'shared-work')).toHaveLength(1);
+  }
+  expect(readBond(state.bonds, 'generated-123-17', 'player').trust).toBe(0);
+  const bonds = structuredClone(state.bonds); session.saveNow(); const next = createSession(storage);
+  next.tick(1); expect(next.state.bonds).toEqual(bonds);
+});
+it('C051: feelings, tea attendance, daily caps, lowering choices and saved event receipts', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session, id = 'generated-123-0';
+  expect(session.expressFeelings(id)).toBe(true); expect(session.expressFeelings(id)).toBe(false);
+  expect(readBond(state.bonds, id, 'player')).toMatchObject({ comfort: -3, romance: 0 });
+  expect(session.inviteHomeTea('locked', id)).toBe(false);
+  state.bonds.edges[edgeKey(id, 'player')] = { ...emptyBond(), affection: 40, trust: 25, comfort: 20, met: true };
+  buyHomeLamp(session); session.tick(1440);
+  expect(session.inviteHomeTea('tea', id)).toBe(true); expect(session.inviteHomeTea('tea', id)).toBe(false);
+  expect(readBond(state.bonds, id, 'player')).toMatchObject({ trust: 27, comfort: 23 });
+  expect(state.dialogue.memories[id].entries[0]).toMatchObject({ kind: 'meal', sourceEventId: 'tea' });
+  expect(session.expressFeelings(id)).toBe(true); expect(readBond(state.bonds, id, 'player').romance).toBe(5);
+  expect(session.setFeeling(id, 'love', 'love')).toBe(true);
+  expect(readBond(state.bonds, 'player', id)).toMatchObject({ affection: 40, trust: 25, comfort: 20, romance: 60 });
+  expect(session.setFeeling(id, 'crush')).toBe(true); expect(readBond(state.bonds, 'player', id).romance).toBe(40);
+  expect(session.setFeeling(id, 'friend')).toBe(true); expect(readBond(state.bonds, 'player', id).romance).toBe(0);
+  session.saveNow(); const next = createSession(storage), before = structuredClone(next.state);
+  expect(next.expressFeelings(id)).toBe(false); expect(next.inviteHomeTea('tea', id)).toBe(false);
+  expect(next.setFeeling(id, 'love', 'love')).toBe(false); expect(next.state).toEqual(before);
+  next.tick(420); expect(next.inviteHomeTea('absent', id)).toBe(false);
+  next.state.relationMode = 'legacy'; const legacy = structuredClone(next.state);
+  expect(next.expressFeelings(id)).toBe(false); expect(next.setFeeling(id, 'love')).toBe(false);
+  expect(next.inviteHomeTea('legacy', id)).toBe(false); expect(next.state).toEqual(legacy);
+});
+it('C051: seed 123 reaches mutual dating within 20 days; chat alone remains acquainted', () => {
+  const storage = memory(); let session = createSession(storage, 123);
+  const chat = createSession(memory(), 123), npc = generate(123, 50)[0], rows = [], stages = new Set();
+  const choice = { id: 'liked-topic', topic: npc.likes[0], tone: npc.traits[0] };
+  buyHomeLamp(session);
+  for (let day = 1; day <= 20; day++) {
+    const { state } = session;
+    if (day <= 9) session.talk(`chat:${day}`, npc.id, choice);
+    else session.expressFeelings(npc.id);
+    session.tick(420); state.player.placeId = 'cafe';
+    if (whereIs(npc, gameTime(state.world.clock)) === 'cafe') expect(session.startWork('tea-helper').ok).toBe(true);
+    session.tick(60); state.player.placeId = 'nest'; session.tick(420);
+    session.inviteHomeTea(`tea:${day}`, npc.id);
+    if (day > 9) session.talk(`chat:${day}`, npc.id, choice);
+    const bond = readBond(state.bonds, npc.id, 'player'), stage = session.buildDialogue(npc.id).stage;
+    rows.push({ day, ...bond, stage }); stages.add(stage);
+    expect(readBond(state.bonds, 'player', npc.id).romance).toBe(0);
+    expect(Object.values(state.bonds.gained).every(value => value <= 10)).toBe(true);
+    chat.talk(`chat:${day}`, npc.id, choice); chat.tick(1440);
+    if (day < 20) session.tick(540);
+    session.saveNow(); session = createSession(storage); expect(session.loadResult.ok).toBe(true);
+  }
+  expect(stages.has('친구')).toBe(true); expect(stages.has('호감')).toBe(true);
+  const { state } = session, consent = { playerWantsDating: true, npcWantsDating: true };
+  expect(session.setFeeling(npc.id, 'love')).toBe(true);
+  expect(canStartDating(readBond(state.bonds, 'player', npc.id), readBond(state.bonds, npc.id, 'player'), consent)).toBe(true);
+  expect(session.confess('dating', npc.id, consent).accepted).toBe(true);
+  expect(state.dialogue.memories[npc.id].entries.some(m => m.kind === 'meal')).toBe(true);
+  expect(chat.buildDialogue(npc.id).stage).toBe('아는 사이');
+  const chatBond = readBond(chat.state.bonds, npc.id, 'player');
+  expect(chatBond).toMatchObject({ trust: 0, respect: 0, romance: 0 });
+  expect(chatBond.affection).toBeCloseTo(98); expect(chatBond.comfort).toBeCloseTo(42);
+  console.table(rows); console.log('C051 chat only', readBond(chat.state.bonds, npc.id, 'player'));
+});
