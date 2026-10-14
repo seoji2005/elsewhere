@@ -112,6 +112,30 @@
       "desc": "그림체: 애니메이션풍 SD 비율 + 현대 생활복 캐릭터",
       "check": "사용자가 폰에서 캐릭터를 보고 '이 방향 좋다'",
       "passes": false
+    },
+    {
+      "id": "M1-20",
+      "stage": "M1",
+      "owner": "auto",
+      "desc": "함께한 일을 나중에 다시 꺼내는 대사(Our Life, R004)",
+      "check": "NPC와 한 일(식사·선물·가게 일)을 며칠 뒤 그 NPC가 먼저 언급한다",
+      "passes": false
+    },
+    {
+      "id": "M2-01",
+      "stage": "M2",
+      "owner": "auto",
+      "desc": "연인이 되면 주변 주민이 알아차리고 반응(Palia)",
+      "check": "연인 단계 뒤 다른 NPC 2명 이상이 그 관계를 언급하거나 반응이 달라진다",
+      "passes": false
+    },
+    {
+      "id": "M2-02",
+      "stage": "M2",
+      "owner": "auto",
+      "desc": "떨어져 있을 때 메신저로 연락하며 관계 유지(Emily is Away)",
+      "check": "폰 화면 메신저로 NPC와 대화하고 그 결과가 관계·약속에 반영된다",
+      "passes": false
     }
   ]
 }
