@@ -14,7 +14,7 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
   'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder,
 });
 await mkdir(join(root, 'src/assets'), { recursive: true });
-for (const [bundle, { directory, files }] of Object.entries(manifest)) {
+for (const [bundle, { directory, files, clips }] of Object.entries(manifest)) {
   const document = new Document();
   const scene = document.createScene(bundle);
   document.getRoot().setDefaultScene(scene);
@@ -28,6 +28,7 @@ for (const [bundle, { directory, files }] of Object.entries(manifest)) {
     scene.addChild(node);
     for (const importedScene of source.getRoot().listScenes()) map.get(importedScene).dispose();
   }
+  if (clips) for (const a of document.getRoot().listAnimations()) if (!clips.includes(a.getName())) { a.listSamplers().forEach(s => s.dispose()); a.dispose(); }
   await document.transform(
     prune({ keepLeaves: true }), dedup(),
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512] }),

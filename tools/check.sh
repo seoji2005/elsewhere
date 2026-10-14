@@ -25,4 +25,5 @@ console.log(`Build size: ${(bytes / 1024).toFixed(1)}KB / 10240KB`);
 if (bytes > 10240 * 1024) throw Error('Build exceeds size limit');
 JS
 if ! "$fast"; then node tools/shot.mjs --smoke; fi
+if ! "$fast"; then for scenario in tests/play/*.mjs; do node "$scenario"; done; fi
 if [[ -n "$card" ]]; then node tools/scope-check.mjs "$card"; fi
