@@ -46,6 +46,23 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const panel = make('hud-panel'), tabBar = make('hud-tabs', panel), body = make('hud-body', panel);
   enter.hidden = panel.hidden = true;
   let tab: Tab = 'people', selected = '', said = '', nearDoor: Door | undefined, timer = 0, shown = '';
+  let pending = false;
+  const pointers = new Set<number>();
+  let updates: (() => void)[] = [];
+  const live = (element: HTMLElement, text: () => string) => {
+    const update = () => { const next = text(); if (element.textContent !== next) element.textContent = next; };
+    updates.push(update);
+    update();
+    return element;
+  };
+  panel.addEventListener('pointerdown', event => pointers.add(event.pointerId), true);
+  const release = (event: PointerEvent) => {
+    if (!pointers.delete(event.pointerId)) return;
+    // The click following pointerup must reach the original button before a deferred rebuild.
+    window.setTimeout(() => render(), 0);
+  };
+  window.addEventListener('pointerup', release, true);
+  window.addEventListener('pointercancel', release, true);
   const say = (text: string) => {
     toast.textContent = text;
     toast.classList.add('show');
@@ -62,15 +79,18 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     catch (error) { say(problems[(error as Error).message] ?? '지금은 할 수 없어요'); }
     render(true);
   };
-  const button = (parent: HTMLElement, text: string, action: () => string | void, disabled = false) => {
+  const button = (parent: HTMLElement, text: string, action: () => string | void, disabled: boolean | (() => boolean) = false) => {
     const element = make('hud-btn', parent, 'button', text) as HTMLButtonElement;
-    element.disabled = disabled;
+    const update = () => { element.disabled = typeof disabled === 'function' ? disabled() : disabled; };
+    updates.push(update);
+    update();
     element.onclick = () => act(action);
     return element;
   };
-  const row = (label: string, sub: string) => {
+  const row = (label: string, sub: string | (() => string)) => {
     const line = make('hud-row', body), text = make('hud-label', line, 'div', label);
-    make('hud-sub', text, 'span', sub);
+    const detail = make('hud-sub', text, 'span', typeof sub === 'string' ? sub : '');
+    if (typeof sub === 'function') live(detail, sub);
     return line;
   };
   const title = (text: string) => make('hud-title', body, 'div', text);
@@ -121,9 +141,9 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     return '지금은 소개해 줄 사람이 떠오르지 않네요.';
   }
   function person(npc: Npc) {
-    const level = value(npc), head = make('hud-head', body);
+    const head = make('hud-head', body);
     button(head, '‹ 목록', () => { selected = ''; });
-    make('hud-name', head, 'div', `${npc.name} · ${relationshipStage(level)} ${level}`);
+    live(make('hud-name', head), () => `${npc.name} · ${relationshipStage(value(npc))} ${value(npc)}`);
     make('hud-say', body, 'div', said);
     const topics = make('hud-chips', body);
     make('hud-sub', topics, 'span', '이야기');
@@ -140,20 +160,20 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       return line;
     }));
     const more = make('hud-chips', body);
-    button(more, '소개팅 부탁 (30+)', () => { said = match(npc); }, level < 30);
+    button(more, '소개팅 부탁 (30+)', () => { said = match(npc); }, () => value(npc) < 30);
     button(more, '고백하기 (60+)', speak(npc, () => session.confess(uid('confess'), npc.id, { playerWantsDating: true,
-      npcWantsDating: readBond(state.bonds, npc.id, 'player').affection >= 30 }).line), level < 60);
+      npcWantsDating: readBond(state.bonds, npc.id, 'player').affection >= 30 }).line), () => value(npc) < 60);
   }
   function people() {
     const date = state.matchmaking.appointments.find(a => a.status === 'scheduled');
-    if (date) note(`약속 · ${date.impression.name} 님 · ${placeName(date.placeId)} ${clock(date.time)}`);
+    if (date) live(note(''), () => `약속 · ${date.impression.name} 님 · ${placeName(date.placeId)} ${clock(date.time)}`);
     const here = residents.filter(n => state.world.people[n.id]?.placeId === state.player.placeId);
     const npc = here.find(n => n.id === selected);
     if (npc) return person(npc);
     title(`${placeName(state.player.placeId)}에 있는 사람`);
     if (!here.length) note('지금은 아무도 없어요. 다른 장소로 가 보세요.');
     for (const n of here.sort((a, b) => Number('speech' in a) - Number('speech' in b) || value(b) - value(a))) {
-      const line = row(n.name, `${n.job} · ${relationshipStage(value(n))} ${value(n)}`);
+      const line = row(n.name, () => `${n.job} · ${relationshipStage(value(n))} ${value(n)}`);
       line.classList.add('tap');
       line.onclick = () => act(() => { selected = n.id; speak(n, () => session.buildDialogue(n.id).line)(); });
     }
@@ -184,38 +204,54 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     const shops = state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null);
     if (!shops.length) note('여기엔 가게가 없어요. 찻방·교환소·뜰에 가 보세요.');
     for (const b of shops) for (const s of b.store.stock) button(row(items.find(i => i.id === s.itemId)?.name ?? s.itemId,
-      `${s.price}결 · 진열 ${s.displayed} · 창고 ${s.backroom}`), '사기', () => buy(b, s.itemId));
+      () => `${s.price}결 · 진열 ${s.displayed} · 창고 ${s.backroom}`), '사기', () => buy(b, s.itemId));
     title('가진 물건');
     if (!owned().length) note('아직 없어요.');
-    for (const item of owned()) button(row(item.name, `${state.shop.residents.player!.inventory[item.id]}개`), '쓰기',
+    for (const item of owned()) button(row(item.name, () => `${state.shop.residents.player!.inventory[item.id]}개`), '쓰기',
       () => `${item.name} 썼어요 · 활력 ${useItem(state.shop, 'player', item.id).energy}`);
   }
   function stocks() {
     title('결증 (1주씩, 수수료 1%)');
     for (const c of companies) {
-      const held = state.market.holdings.player?.[c.id] ?? 0, line = row(c.name, `${state.market.prices[c.id]}결 · ${held}주`);
+      const line = row(c.name, () => `${state.market.prices[c.id]}결 · ${state.market.holdings.player?.[c.id] ?? 0}주`);
       for (const side of ['buy', 'sell'] as const) button(line, side === 'buy' ? '사기' : '팔기', () => {
         const result = trade(state.market, state.world.ledger,
           { id: uid(side), time: now(), account: 'player', companyId: c.id, quantity: 1, side }, 'aro');
         return result.ok ? `${c.name} 1주 ${side === 'buy' ? '샀' : '팔았'}어요` : problems[result.error] ?? '거래할 수 없어요';
-      }, side === 'sell' && !held);
+      }, () => side === 'sell' && !(state.market.holdings.player?.[c.id] ?? 0));
     }
     title('장소 이동');
     const list = make('hud-chips', body);
     for (const place of places) button(list, place.name, () => { go(place.id); return `${place.name} 도착`; },
       place.id === state.player.placeId);
   }
-  // Status bar every second; the open panel only redraws when what it shows may have changed.
+  // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
     cashText.textContent = `${cash}결`;
     energyText.textContent = `활력 ${energy}`;
-    const key = [tab, state.player.placeId, selected, cash, energy, Math.floor(state.world.clock.totalMinutes / 10)].join('|');
-    if (panel.hidden || !force && key === shown) return;
+    pending ||= force;
+    if (panel.hidden) return;
+    const membership = tab === 'people'
+      ? [residents.filter(n => state.world.people[n.id]?.placeId === state.player.placeId).map(n => n.id),
+        state.matchmaking.appointments.find(a => a.status === 'scheduled')?.id,
+        selected ? owned().map(i => i.id) : []]
+      : tab === 'work'
+        ? [state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null)
+          .map(b => [b.id, b.store.stock.map(s => s.itemId)]), owned().map(i => i.id)]
+        : [companies.map(c => c.id), Object.keys(state.market.holdings.player ?? {})
+          .filter(id => state.market.holdings.player[id] > 0).sort()];
+    const key = JSON.stringify([tab, state.player.placeId, selected, membership]);
+    if (pointers.size || !pending && key === shown) {
+      updates.forEach(update => update());
+      return;
+    }
+    pending = false;
     shown = key;
     const scroll = body.scrollTop;
+    updates = [];
     body.replaceChildren();
     Array.from(tabBar.children).forEach((element, index) => element.classList.toggle('on', Object.keys(tabs)[index] === tab));
     ({ people, work: chores, stock: stocks })[tab]();
