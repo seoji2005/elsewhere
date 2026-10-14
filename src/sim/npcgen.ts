@@ -69,6 +69,8 @@ export function generate(seed: number, count: number): GeneratedNpc[] {
     free[home]--; free[work.place]--;
     const start = (6 + Math.floor(random() * 5)) * 60;
     const restDay = Math.floor(random() * 7);
+    // Work ends by 18:00; at most 12 visitors plus 6 core residents share a walk.
+    const walk = 1080 + Math.floor(index / 12) * 30;
     return {
       id: `generated-${seed}-${index}`, name, age: 18 + Math.floor(random() * 53), job: work.job,
       archetypeId: archetype.id, traits: [...archetype.traits],
@@ -83,7 +85,8 @@ export function generate(seed: number, count: number): GeneratedNpc[] {
         height: (90 + Math.floor(random() * 21)) / 100,
       },
       schedule: Array.from({ length: 7 }, (_, day) => day === restDay
-        ? [{ fromMinute: 0, placeId: home }]
+        ? [{ fromMinute: 0, placeId: home }, { fromMinute: walk, placeId: 'park' },
+          { fromMinute: walk + 30, placeId: home }]
         : [{ fromMinute: 0, placeId: home }, { fromMinute: start, placeId: work.place },
           { fromMinute: start + 480, placeId: home }]),
     };

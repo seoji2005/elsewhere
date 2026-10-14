@@ -244,12 +244,13 @@ it.each([0, 1, 123, 0xffffffff])('runs a conserved, funded 56-resident economy f
   expect(Object.keys(state.purses)).toHaveLength(57);
   expect(generate(seed, 50).every(n => ledger.balances[n.id] >= 20)).toBe(true);
   expect(ledger.transactions.filter(t => t.reason === 'Initial allocation')).toHaveLength(50);
-  expect(state.book.businesses).toHaveLength(3);
+  expect(state.book.businesses).toHaveLength(4);
   for (const b of state.book.businesses) {
-    expect(residents.find(n => n.id === b.ownerId)!.job).toBe(producerJobs[b.store.stock[0].itemId]);
+    const producerJob = b.id === 'light-counter' ? '빛씨 조율사' : producerJobs[b.store.stock[0].itemId];
+    expect(residents.find(n => n.id === b.ownerId)!.job).toBe(producerJob);
     const staff = state.book.employment.filter(e => e.businessId === b.id);
     expect(staff).toHaveLength(b.capacity);
-    expect(staff.every(e => residents.find(n => n.id === e.actorId)!.job === producerJobs[b.store.stock[0].itemId])).toBe(true);
+    expect(staff.every(e => residents.find(n => n.id === e.actorId)!.job === producerJob)).toBe(true);
     expect(b.store.stock[0].backroom + b.store.stock[0].displayed).toBe(0);
   }
   const started = performance.now(), minima: Record<string, number> = {};
@@ -269,7 +270,7 @@ it.each([0, 1, 123, 0xffffffff])('runs a conserved, funded 56-resident economy f
       expect(whereIs(residents.find(n => n.id === event.actorId)!, event.time)).toBe(b.placeId);
     const orders = ledger.transactions.filter(t => t.reason.startsWith(`Procurement: ${b.id}:`));
     expect(orders.length).toBeGreaterThan(0);
-    expect(orders.every(t => residents.find(n => n.id === t.to)!.job === producerJobs[b.store.stock[0].itemId])).toBe(true);
+    expect(orders.every(t => residents.find(n => n.id === t.to)!.job === (b.id === 'light-counter' ? '빛씨 조율사' : producerJobs[b.store.stock[0].itemId]))).toBe(true);
     const revenue = b.store.events.reduce((sum, e) => sum + e.amount, 0), units = revenue / b.store.stock[0].price;
     expect(orders.length * 5 - units).toBe(b.store.stock[0].backroom + b.store.stock[0].displayed);
     return { id: b.id, revenue, wages: ledger.transactions.filter(t => t.from === b.ownerId && t.reason.startsWith('Wage: '))
@@ -290,7 +291,7 @@ it('keeps the same seeded economy for whole, split and saved ticks without redis
   expect(split.state).toEqual(whole.state);
   expect(split.state.world.ledger.transactions.filter(t => t.reason === 'Initial allocation')).toHaveLength(50);
 });
-it('settles both listed shops once using their actual revenue, without affecting the unlisted shop', () => {
+it('settles all three listed shops once using their actual revenue, without affecting the unlisted shop', () => {
   const session = createSession(memory(), 123); session.tick(3 * 1440 - 1);
   const expected = structuredClone(session.state.market);
   for (const b of session.state.book.businesses) if (companies.some(c => c.npcId === b.ownerId))
@@ -337,4 +338,77 @@ it('connects generated dialogue, gifts, dating, introductions and public notices
   session.tick(6 * 60); expect(state.ripple.notices.some(n => n.mode === 'rumor')).toBe(true);
   session.saveNow(); expect(createSession(storage).state).toEqual(state);
   expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+});
+
+it('adds the light counter once to existing population saves without allocating money', () => {
+  const storage = memory(), session = createSession(storage, 123), { book, world } = session.state;
+  book.businesses = book.businesses.filter(b => b.id !== 'light-counter');
+  book.employment = book.employment.filter(e => e.businessId !== 'light-counter');
+  const before = structuredClone(world.ledger); session.saveNow();
+  const next = createSession(storage); expect(next.loadResult.ok).toBe(true);
+  expect(next.state.book.businesses.filter(b => b.ownerId === 'aro')).toHaveLength(1);
+  expect(next.state.world.ledger).toEqual(before); next.saveNow();
+  expect(createSession(storage).state).toEqual(next.state);
+});
+it('prunes only completed records older than 14 days at midnight in every store', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session;
+  session.tick(15 * 1440 - 1); const cutoff = 1440;
+  const shift = { actorId: 'player', jobId: 'pending', employerId: 'aro', startedAt: 0, wage: 1000000 };
+  state.work.shifts.push({ ...shift, id: 'old', endsAt: cutoff - 1, paid: true },
+    { ...shift, id: 'boundary', endsAt: cutoff, paid: true }, { ...shift, id: 'unpaid', endsAt: 1, paid: false });
+  for (const store of [state.store, ...state.book.businesses.map(b => b.store)]) {
+    const visit = { actorId: 'player', need: { itemId: 'tea', maxPrice: 8 }, price: 8, patienceMinutes: 100000 };
+    store.visits.push(...(['paid', 'left', 'waiting'] as const).map(status =>
+      ({ ...visit, id: `old-${status}`, joinedMinute: cutoff - 1, status })),
+      { ...visit, id: 'boundary', joinedMinute: cutoff, status: 'paid' });
+  }
+  const events = structuredClone(state.book.businesses.map(b => b.store.events));
+  session.tick(0); expect(state.work.shifts.some(s => s.id === 'old')).toBe(true);
+  session.tick(1); expect(state.work.shifts.some(s => s.id === 'old')).toBe(false);
+  expect(state.work.shifts.filter(s => ['boundary', 'unpaid'].includes(s.id))).toHaveLength(2);
+  for (const store of [state.store, ...state.book.businesses.map(b => b.store)]) {
+    expect(store.visits.filter(v => v.id.startsWith('old-')).map(v => v.status)).toEqual(['waiting']);
+    expect(store.visits.some(v => v.id === 'boundary')).toBe(true);
+  }
+  expect(state.book.businesses.map(b => b.store.events)).toEqual(events);
+  expect(createSession(storage).state).toEqual(state);
+});
+it('measures 30/60-day saves and keeps completed shift and visit history bounded', () => {
+  const storage = memory(), session = createSession(storage, 123), { state } = session;
+  const shifts = new Map(), visits = state.book.businesses.map(() => new Map());
+  for (let day = 1; day <= 60; day++) {
+    session.tick(1439);
+    for (const s of state.work.shifts) shifts.set(s.id, s);
+    state.book.businesses.forEach((b, i) => b.store.visits.forEach(v => visits[i].set(v.id, v)));
+    session.tick(1);
+    expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+    expect(state.work.shifts.every(s => !s.paid || s.endsAt >= day * 1440 - 14 * 1440)).toBe(true);
+    expect(state.book.businesses.every(b => b.store.visits.every(v => v.status === 'waiting' ||
+      v.joinedMinute >= day * 1440 - 14 * 1440))).toBe(true);
+    if (day === 30 || day === 60) {
+      const raw = storage.getItem(SESSION_KEY)!, unpruned = JSON.parse(raw);
+      unpruned.state.work.shifts = [...shifts.values()];
+      unpruned.state.book.businesses.forEach((b: typeof state.book.businesses[number], i: number) => b.store.visits = [...visits[i].values()]);
+      const bytes = Buffer.byteLength(raw), withoutPruning = Buffer.byteLength(JSON.stringify(unpruned));
+      expect(bytes).toBeLessThan(withoutPruning);
+      console.log('C035 save bytes', { day, bytes, withoutPruning });
+      expect(createSession(storage).state).toEqual(state);
+    }
+  }
+});
+
+it('applies light revenue growth to its price exactly once at midnight', () => {
+  const session = createSession(memory(), 123); session.tick(2 * 1440 - 1);
+  const b = session.state.book.businesses.find(b => b.id === 'light-counter')!;
+  expect(b.store.events.some(e => e.reason === 'purchased')).toBe(true);
+  b.store.events.push({ visitId: 'growth', actorId: 'player', itemId: 'lamp',
+    time: { day: 2, hour: 23, minute: 59 }, reason: 'purchased', amount: 300 });
+  const expected = structuredClone(session.state.market), baseline = structuredClone(expected);
+  for (const business of session.state.book.businesses) if (companies.some(c => c.npcId === business.ownerId)) {
+    const change = revenueChange(business, 2); recordNpcRevenue(expected, business.ownerId, change);
+    if (business.ownerId !== 'aro') recordNpcRevenue(baseline, business.ownerId, change);
+  }
+  advanceDay(expected); advanceDay(baseline); session.tick(1);
+  expect(session.state.market).toEqual(expected); expect(expected.prices.light).not.toBe(baseline.prices.light);
+  session.tick(0); session.saveNow(); expect(session.state.market).toEqual(expected);
 });

@@ -56,10 +56,12 @@ it('keeps all weekly intervals within capacity including core residents', () => 
   for (const seed of [0, 1, 21, 42, 0xffffffff]) {
     const generated = generate(seed, seed === 42 ? 66 : 50); // 42: fill to capacity (66 with 6 core residents)
     const residents: Npc[] = [...npcs, ...generated];
-    for (const npc of generated) {
+    for (const [index, npc] of generated.entries()) {
       expect(npc.schedule).toHaveLength(7);
-      expect(npc.schedule.filter(day => day.length === 1)).toHaveLength(1);
-      expect(new Set(npc.schedule.flat().map(slot => slot.placeId)).size).toBe(2);
+      const walk = 1080 + Math.floor(index / 12) * 30;
+      expect(npc.schedule.filter(day => day.some(s => s.fromMinute === walk && s.placeId === 'park') &&
+        day.some(s => s.fromMinute === walk + 30 && s.placeId === day[0].placeId))).toHaveLength(1);
+      expect(new Set(npc.schedule.flat().map(slot => slot.placeId)).size).toBeGreaterThanOrEqual(2);
       for (const day of npc.schedule) {
         expect(day[0].fromMinute).toBe(0);
         day.forEach((slot, i) => {
