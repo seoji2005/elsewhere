@@ -34,4 +34,12 @@ export const dialogueTemplates: Record<string, DialogueTemplate> = {
     gift: '마음 써 줘서 고마워요. 잘 돌볼게요.', dislikedGift: '고맙지만 뜰 곁에 두기는 곤란해요.',
     accept: '네. 서로의 하루를 함께 돌봐요.', refuse: '아직은 그 마음을 받아들일 수 없어요.',
   },
+  // Public 해요체 until a real conversation, then short 반말; name only once dating.
+  lise: {
+    greeting: '어서 오세요. 지금 조율 중이라 용건만 짧게 부탁드려요.', familiar: '왔네. 마침 고리 하나 다 맞췄어.',
+    chat: '오늘 고리 마흔 개 맞췄어. 그사이 누엘은 찻잔 세 개를 비웠고.',
+    repeat: '같은 걸 두 번 묻는 건 너뿐이야. …그래, 오늘은 좀 피곤해.',
+    gift: '…고마워. 방금 웃은 거 아니야. 조명 각도 탓이야.', dislikedGift: '마음만 받을게. 이건 조율실에 둘 데가 없네.',
+    accept: '…응. 일정 빈칸은 이제 네 이름으로 채울게.', refuse: '고마워. 그래도 그건 대충 맞출 수 있는 각도가 아니야.',
+  },
 };
