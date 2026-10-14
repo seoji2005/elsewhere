@@ -3,8 +3,8 @@ import { MeshLambertMaterial } from 'three';
 
 // Shared matte materials; own colours, no copied LUT, texture or node shader.
 export function cornerPalette() {
-  const colors = { plaster: '#d8ccb7', asphalt: '#525d68',
-    curb: '#a1aaa8', brick: '#ab7761', foliage: '#648873', metal: '#6f7d86' };
+  const colors = { plaster: '#d8ccb7', asphalt: '#414750',
+    curb: '#a1aaa8', brick: '#d6b7a3', foliage: '#648873', metal: '#6f7d86' };
   const materials = {
     plaster: new MeshLambertMaterial({ color: colors.plaster }),
     asphalt: new MeshLambertMaterial({ color: colors.asphalt }),

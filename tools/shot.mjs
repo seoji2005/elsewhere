@@ -22,6 +22,8 @@ try {
   });
   for (const query of queries) {
   await page.goto(pathToFileURL(resolve('dist-single/index.html')).href + (query ? '?' + query.replace(/^\?/, '') : ''));
+  // CPU (SwiftShader) rendering on the server is slow; allow a long first frame.
+  page.setDefaultTimeout(240_000);
   await page.locator('canvas[data-ready="true"]').waitFor();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const jpeg = await page.screenshot({ type: 'jpeg', quality: 85 });

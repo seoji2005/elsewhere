@@ -9,8 +9,8 @@ export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
     type: renderer.shadowMap.type };
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFSoftShadowMap;
-  const fill = new HemisphereLight('#b9d4e5', '#655447', 0.8);
-  const sun = new DirectionalLight('#ffe0b2', 2.2);
+  const fill = new HemisphereLight('#92b7e5', '#64504a', 0.8);
+  const sun = new DirectionalLight('#ffbc7e', 2.8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(mapSize, mapSize);
   Object.assign(sun.shadow.camera, { left: -radius, right: radius,
@@ -18,7 +18,7 @@ export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -0.0002;
   sun.shadow.normalBias = 0.04;
-  const offset = new Vector3(1, 1.6, 0.7).normalize().multiplyScalar(radius * 3);
+  const offset = new Vector3(-0.8, Math.tan(11 * Math.PI / 180), 0.6).normalize().multiplyScalar(radius * 3);
   function update(target: Vector3) {
     sun.target.position.copy(target);
     sun.position.copy(target).add(offset);

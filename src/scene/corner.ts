@@ -31,27 +31,53 @@ export async function buildCorner(scene: T.Scene) {
     const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material);
     mesh.name = name; mesh.position.set(x, y, z); scene.add(mesh);
   }
-  slab(70, 0.15, 70, 0, -0.16, 0, asphalt, 'asphalt');
-  // The two perpendicular carriageways meet at (0, 0); the hero block is northwest.
-  slab(24, 0.22, 19, -16, 0, -13.5, paving, 'curb');
-  place(city.scene, 'Building_Small_1', -9, -9.5, 8, 0, 0.11);
-  place(city.scene, 'Building_Medium_2_001', -18, -10, 9, 0, 0.11);
-  place(city.scene, 'Building_Large_2', -23, -18, 8, Math.PI / 2, 0.11);
-  place(city.scene, 'Street_4WayIntersection', 0, 0, 16);
-  for (const z of [-9, 9]) for (let i = 0; i < 7; i++)
+  slab(360, 0.15, 360, 0, -0.16, 0, asphalt, 'asphalt');
+  // Continuous sidewalks border two ten-metre streets; façades abut the paving.
+  for (const x of [-54, 54]) for (const z of [-54, 54])
+    slab(98, 0.22, 98, x, 0, z, paving, 'curb');
+  place(city.scene, 'Building_Small_1', -10.5, -11, 8, 0, 0.11);
+  place(city.scene, 'Building_Medium_2_001', -19.1, -11, 9, 0, 0.11);
+  place(city.scene, 'Building_Large_2', -10, -22, 8, Math.PI / 2, 0.11);
+  const types = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
+  const background = new T.Group();
+  scene.add(background);
+  for (const [i, x, z, rotation] of [
+    [0, -29, -11, 0], [1, -39, -11, 0], [2, -10, -34, Math.PI / 2],
+    [0, -21, -27, 0], [1, -32, -27, 0], [2, -44, -28, 0],
+    [0, 11, -18, -Math.PI / 2], [1, 11, -29, -Math.PI / 2],
+    [2, 11, -41, -Math.PI / 2], [0, 22, -32, Math.PI],
+    [1, -29, 11, Math.PI], [0, -40, 11, Math.PI],
+    [2, -52, -11, 0], [0, -10, -47, Math.PI / 2],
+  ]) {
+    const building = place(city.scene, types[i], x, z, 9, rotation, 0.11);
+    building.traverse(child => {
+      if (!(child instanceof T.Mesh)) return;
+      const vary = (material: T.Material) => {
+        if (!(material instanceof T.MeshStandardMaterial) || !/brick/i.test(material.name)) return material;
+        const tint = material.clone();
+        tint.color.multiply(new T.Color(['#d2bbb0', '#b0b9c7', '#e4ceb2'][i]));
+        return tint;
+      };
+      child.material = Array.isArray(child.material) ? child.material.map(vary) : vary(child.material);
+    });
+    background.add(building);
+  }
+  for (const z of [-6.6, 6.6]) for (let i = 0; i < 7; i++)
     slab(0.65, 0.025, 2.5, -3.3 + i * 1.1, 0.025, z, paint, 'crosswalk');
-  for (const x of [-9, 9]) for (let i = 0; i < 7; i++)
+  for (const x of [-6.6, 6.6]) for (let i = 0; i < 7; i++)
     slab(2.5, 0.025, 0.65, x, 0.025, -3.3 + i * 1.1, paint, 'crosswalk');
-  for (let z = 13; z <= 28; z += 5)
+  for (let z = -93; z <= 93; z += 5) {
+    if (Math.abs(z) < 10) continue;
     slab(0.12, 0.025, 2.5, 0, 0.025, z, paint, 'lane paint');
-  for (const [x, z] of [[-6, -5.5], [-15, -5.5], [-25, -6]]) {
+  }
+  for (const [x, z] of [[-6, -7.5], [-15, -5.9], [-25, -5.9]]) {
     place(city.scene, 'Prop_Planter_Single', x, z, 1.2, 0, 0.11);
     place(nature.scene, 'CommonTree_1', x, z, 3.2, 0, 0.65);
   }
   for (const x of [-8, -11, -18, -21])
-    place(city.scene, 'Prop_Bollard', x, -4.4, undefined, 0, 0.11);
-  place(cars.scene, 'sedan', -11, -2.8, 1.8, Math.PI / 2);
-  place(cars.scene, 'van', -20, -2.8, 1.9, Math.PI / 2);
+    place(city.scene, 'Prop_Bollard', x, -5.4, undefined, 0, 0.11);
+  place(cars.scene, 'sedan', -11, -3.4, 1.8, Math.PI / 2);
+  place(cars.scene, 'van', -20, -3.4, 1.9, Math.PI / 2);
   scene.traverse(object => {
     if (object instanceof T.Mesh) {
       object.castShadow = !/asphalt|crosswalk|lane paint/.test(object.name);
