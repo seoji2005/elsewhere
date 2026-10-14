@@ -93,7 +93,6 @@
       "id": "M1-17",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "NPC 생성기: 성격 유형·말투·외형 변수·일과로 NPC 50명 이상",
       "check": "새 게임마다 서로 다른 50명 이상이 각자 일과대로 움직이고 말투가 다르다",
       "passes": false
@@ -102,7 +101,6 @@
       "id": "M1-18",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "만남: 우연한 만남과 소개팅",
       "check": "정해진 상대 없이, 장소·시간에 따라 새 사람을 만나고 소개팅을 잡아 만날 수 있다",
       "passes": false
