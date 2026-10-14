@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLedger, transfer, type Transaction } from '../../src/sim/ledger';
+import { createLedger, transfer, compactLedger, type Transaction } from '../../src/sim/ledger';
 
 const payment = (): Transaction => ({
   id: 'pay-1', time: { day: 1, hour: 9, minute: 0 }, from: 'shop', to: 'player', amount: 30, reason: 'wage',
@@ -35,4 +35,16 @@ describe('ledger', () => {
     expect(ledger).toEqual(before);
     expect(() => createLedger({ player: -1 })).toThrow();
   });
+});
+
+it('preserves daily income/expense and exact retired IDs even with a new retry date', () => {
+  const ledger = createLedger({ shop: 100, player: 0 }); transfer(ledger, payment());
+  transfer(ledger, { ...payment(), id: 'boundary', time: { day: 2, hour: 0, minute: 0 } });
+  const balances = { ...ledger.balances }; compactLedger(ledger, 2);
+  expect(ledger.history).toEqual({ ids: ['pay-1'], days: { 1: { shop: [0, 30], player: [30, 0] } } });
+  expect(ledger.transactions.map(t => t.id)).toEqual(['boundary']);
+  const restored = JSON.parse(JSON.stringify(ledger)); compactLedger(restored, 2); expect(restored).toEqual(ledger);
+  expect(transfer(restored, { ...payment(), amount: 70, time: { day: 20, hour: 0, minute: 0 } })).toEqual({ ok: true, duplicate: true });
+  expect(restored.balances).toEqual(balances);
+  expect(transfer(restored, { ...payment(), id: 'late-unpaid' }).ok).toBe(true);
 });

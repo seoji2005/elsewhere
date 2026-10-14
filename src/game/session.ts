@@ -5,6 +5,7 @@ import { items } from '../data/items';
 import { chooseNeed, type Customer } from '../sim/customer';
 import { advanceClock, gameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
+import { compactLedger } from '../sim/ledger';
 import { restoreWorld } from '../sim/save';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
@@ -102,7 +103,8 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
   world.people = Object.fromEntries(npcs.map(n => [n.id,
     { id: n.id, name: n.name, role: 'npc' as const, placeId: whereIs(n, gameTime(world.clock)) }]));
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
-  return { npcSeed, populationEconomy: false, world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
+  return { npcSeed, populationEconomy: false, revenueHistory: {} as Record<string, Record<string, number>>,
+    world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
@@ -190,6 +192,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
           ripple: createRippleState(), relationMode: 'legacy' });
         if (parsed.version < 4) Object.assign(state, createEconomy(state.world));
         if (parsed.version < 5) state.populationEconomy = false;
+        state.revenueHistory ??= {};
         // Generated identities are omitted from saves; wallets and contracts are retained.
         if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
           !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
@@ -199,6 +202,23 @@ export function createSession(storage: Storage, npcSeed?: number) {
         checkSocial(state);
         if (state.economyMinute !== Math.floor(state.world.clock.totalMinutes) ||
             state.settledDay !== state.market.day - 1) throw Error('Invalid economic cursor');
+        const history = state.world.ledger.history;
+        if (history !== undefined) {
+          checkShape(history, { ids: [], days: {} });
+          if (!history.ids.every(id => typeof id === 'string' && id.length > 0) ||
+              new Set(history.ids).size !== history.ids.length) throw Error('Invalid retired IDs');
+          for (const [day, accounts] of Object.entries(history.days)) {
+            if (!Number.isSafeInteger(Number(day)) || Number(day) < 1) throw Error('Invalid history day');
+            checkShape(accounts, {});
+            for (const totals of Object.values(accounts)) if (!Array.isArray(totals) || totals.length !== 2 ||
+              !totals.every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid cashflow');
+          }
+        }
+        for (const days of Object.values(state.revenueHistory)) {
+          checkShape(days, {});
+          if (Object.entries(days).some(([d, n]) => !Number.isSafeInteger(Number(d)) || Number(d) < 1 ||
+              !Number.isSafeInteger(n) || n < 0)) throw Error('Invalid revenue history');
+        }
         for (const [id, purse] of Object.entries(state.purses)) {
           if (purse.personId !== id || !personAccount(state.world.people, state.world.ledger, id)) throw Error('Invalid purse');
           funds(state.world.ledger, purse);
@@ -417,9 +437,18 @@ export function createSession(storage: Storage, npcSeed?: number) {
         advanceDay(state.market); state.settledDay = now.day - 1;
         if (state.populationEconomy) supplyDay(state, residents);
         const cutoff = minute - 14 * 1440;
+        const beforeDay = now.day - 14;
+        compactLedger(world.ledger, beforeDay);
         state.work.shifts = state.work.shifts.filter(s => !s.paid || s.endsAt >= cutoff);
-        for (const store of [state.store, ...book.businesses.map(b => b.store)])
+        for (const [id, store] of [['player-store', state.store], ...book.businesses.map(b => [b.id, b.store] as const)] as const) {
           store.visits = store.visits.filter(v => v.status === 'waiting' || v.joinedMinute >= cutoff);
+          const history = state.revenueHistory[id] ??= {};
+          store.events = store.events.filter(e => {
+            if (e.time.day >= beforeDay) return true;
+            history[e.time.day] = (history[e.time.day] ?? 0) + e.amount;
+            return false;
+          });
+        }
       }
       expireVisits(state.store, now);
       for (const appointment of state.matchmaking.appointments) {
