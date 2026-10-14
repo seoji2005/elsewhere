@@ -39,23 +39,26 @@ function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: numbe
   return new T.AnimationClip(clip.name, clip.duration, tracks);
 }
 
-// SD proportions on the raw bones (R012), per ?sd= level: [body, head, limb length, limb girth, hands and feet].
+// SD proportions: [body, head, arm length, limb girth, hands/feet, thigh length, torso length, calf length].
 // VRoid rest bones carry no rotation (arms run along X, legs along Y), so limbs shrink along the bone and thicken
 // across it; hands and feet are counter-scaled to stay uniform. Collider and hit radii are world units, so they
 // follow their bone's world scale; the model is lowered by what the shorter legs lifted the soles.
-const SD = [[1, 1, 1, 1, 1], [0.8, 1.8, 0.78, 1.22, 1.15], [0.7, 2.1, 0.72, 1.35, 1.2]];
+const SD = [[1, 1, 1, 1, 1, 1, 1, 1], [0.8, 1.8, 0.78, 1.22, 1.15, 0.74, 0.95, 1], [0.7, 2.1, 0.72, 1.35, 1.2, 0.55, 0.55, 0.7]];
 function proportion(vrm: VRM, sd: number) {
-  const [body, head, length, girth, ends] = SD[sd], v = new T.Vector3();
+  const [body, head, length, girth, ends, legs, torso, calf] = SD[sd], v = new T.Vector3();
   const raw = (name: VRMHumanBoneName) => vrm.humanoid.getRawBoneNode(name)!;
   vrm.scene.updateMatrixWorld(true);
   const ankle = raw('leftFoot').getWorldPosition(v).y;
   raw('hips').scale.setScalar(body);
   raw('head').scale.setScalar(head);
+  // Shorten torso offsets without shrinking the head or inheriting another scale into the arms.
+  for (const name of ['spine', 'chest', 'upperChest', 'neck', 'head'] as const) raw(name).position.y *= torso;
   for (const side of ['left', 'right'] as const) {
     raw(`${side}UpperArm`).scale.set(length, girth, girth);
     raw(`${side}Hand`).scale.set(ends / length, ends / girth, ends / girth);
-    raw(`${side}UpperLeg`).scale.set(girth, length, girth);
-    raw(`${side}Foot`).scale.set(ends / girth, ends / length, ends / girth);
+    raw(`${side}UpperLeg`).scale.set(girth, legs, girth);
+    raw(`${side}LowerLeg`).scale.y = calf;
+    raw(`${side}Foot`).scale.set(ends / girth, ends / (legs * calf), ends / girth);
   }
   vrm.scene.updateMatrixWorld(true);
   vrm.scene.position.y -= raw('leftFoot').getWorldPosition(v).y - ankle * body * ends;
@@ -86,7 +89,7 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   const bodyScale = proportion(vrm, sd);
   const focusHeight = 1.4 * (sd ? height() / originalHeight : 1);
   // Cache sole corners from the scaled foot geometry; foot/toe bone origins are above the soles.
-  const contacts = sd === 2 ? (['left', 'right'] as const).flatMap(side => {
+  const contacts = sd ? (['left', 'right'] as const).flatMap(side => {
     const bone = vrm.humanoid.getRawBoneNode(`${side}Foot`)!, toes = vrm.humanoid.getRawBoneNode(`${side}Toes`), box = new T.Box3();
     vrm.scene.traverse(object => {
       if (!(object instanceof T.SkinnedMesh)) return;
@@ -109,8 +112,8 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   rig.traverse(object => { if (object.userData.name === 'pelvis') pelvis = object; });
   const v = new T.Vector3(), hips = vrm.humanoid.getNormalizedBoneNode('hips')!;
   // Scene lowering must not shrink the hips track again; preserve its local rest height.
-  const scale = bodyScale * (sd === 2 ? hips.position.y : hips.getWorldPosition(v).y) / pelvis.getWorldPosition(v).y;
-  const hipsOffset = sd === 2 ? hips.position.y * (1 - bodyScale) : 0;
+  const scale = bodyScale * (sd ? hips.position.y : hips.getWorldPosition(v).y) / pelvis.getWorldPosition(v).y;
+  const hipsOffset = sd ? hips.position.y * (1 - bodyScale) : 0;
   const mixer = new T.AnimationMixer(vrm.scene);
   const [idle, walk, run] = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop'].map(name =>
     mixer.clipAction(retarget(motion.animations.find(clip => clip.name === name)!, rig, vrm, scale, hipsOffset)).play());
@@ -133,7 +136,7 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
     const smile = T.MathUtils.smoothstep(time, smileAt, smileAt + 0.4) * (1 - T.MathUtils.smoothstep(time, smileAt + 2.2, smileAt + 2.6));
     face?.setValue('happy', 0.65 * smile);
     face?.setValue('blink', Math.max(0, 1 - Math.abs(time - blinkAt - 0.08) / 0.08) * (1 - smile));
-    if (sd === 2) {
+    if (sd) {
       vrm.humanoid.update(); group.updateMatrixWorld(true);
       vrm.scene.position.y += group.getWorldPosition(v).y - Math.min(...contacts.map(({ bone, point }) => bone.localToWorld(v.copy(point)).y));
     }
