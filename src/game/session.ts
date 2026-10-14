@@ -9,7 +9,7 @@ import { restoreWorld } from '../sim/save';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
-import { createWorkState, finishWork } from '../sim/work';
+import { createWorkState, finishWork, startWork as beginWork } from '../sim/work';
 import { createStore, expireVisits, restock, visitStore } from '../sim/store';
 import { createShopState, useItem, giveGift } from '../sim/shop';
 import { createRelationshipState, type DialogueChoice } from '../sim/relationship';
@@ -76,6 +76,24 @@ function addResidents(state: ReturnType<typeof freshState>, allocate = false, op
     }
   }
   return residents;
+}
+// Two paid five-unit batches: a full shelf and a reserve for the first night.
+function supplyDay(state: ReturnType<typeof freshState>, residents: ReturnType<typeof addResidents>) {
+  const { world, book } = state, time = gameTime(world.clock);
+  for (const b of book.businesses) if (b.closedAt === null) for (const stock of b.store.stock) {
+    const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
+    if (!producer) continue;
+    for (let batch = 0; stock.backroom + stock.displayed < 10 && batch < 2; batch++) {
+      const unitCost = Math.max(1, Math.floor(stock.price / 4)), id = `daily-supply:${b.id}:${stock.itemId}:${time.day}:${batch}`;
+      const result = stock.itemId === 'lamp'
+        ? payPerson(world.people, world.ledger, { id, from: b.ownerId, to: producer.id,
+          amount: 5 * unitCost, time, reason: `Procurement: ${b.id}:lamp:5:${unitCost}` })
+        : procure(book, world.people, world.ledger, b.id, producer, stock.itemId, 5, unitCost, id, time);
+      if (!result.ok || result.duplicate) break;
+      if (stock.itemId === 'lamp') stock.backroom += 5; // Same paid adapter as hourly procurement.
+    }
+    restock(b.store, stock.itemId, stock.capacity);
+  }
 }
 function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
   const world = createWorld();
@@ -148,7 +166,7 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
 }
 export function createSession(storage: Storage, npcSeed?: number) {
   let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null;
-  addResidents(state, true, true);
+  supplyDay(state, addResidents(state, true, true));
   let loadResult: SaveResult = { ok: true };
   const backup = () => {
     if (damaged === null) return;
@@ -225,7 +243,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
         generate(state.npcSeed, 0); // Validate the saved uint32 seed before accepting the save.
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
-      } catch (error) { state = freshState(npcSeed); addResidents(state, true, true); damaged = raw; loadResult = { ok: false, error }; backup(); }
+      } catch (error) { state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); damaged = raw; loadResult = { ok: false, error }; backup(); }
     }
   } catch (error) { loadResult = { ok: false, error }; }
   const residents = addResidents(state);
@@ -307,12 +325,24 @@ export function createSession(storage: Storage, npcSeed?: number) {
       return requestMatch(state.matchmaking, state.encounters, { relationships }, request);
     },
   };
+  const playerLife = () => state.shop.residents.player ??= { inventory: {}, energy: 50,
+    appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+  const startWork = (jobId: string) => {
+    if (playerLife().energy < 10) return { ok: false as const, error: '활력이 부족해요 (10 이상 필요)' };
+    try { return { ok: true as const, shift: beginWork(state.work, 'player', jobId,
+      state.player.placeId, gameTime(state.world.clock)) }; }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : String(error) }; }
+  };
   const tick = (realSeconds: number): SaveResult | undefined => {
     const days = advanceClock(state.world.clock, realSeconds);
     const target = state.world.clock.totalMinutes, { world, book, purses } = state;
     for (let minute = state.economyMinute + 1; minute <= Math.floor(target); minute++) {
       world.clock.totalMinutes = minute;
       const now = gameTime(world.clock);
+      const life = playerLife(), hour = Math.floor((minute - 1) % 1440 / 60);
+      const working = state.work.shifts.some(s => s.actorId === 'player' && s.startedAt < minute && s.endsAt >= minute);
+      const resting = hour >= 22 || hour < 6 || ['nest', 'quiet', 'high'].includes(state.player.placeId);
+      life.energy = Math.max(0, Math.min(100, life.energy + ((resting && !working ? 3 : -1) - (working ? 5 : 0)) / 60));
       const payWages = () => {
         for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute) {
           shift.employerId = personalEmployer[shift.employerId] ?? shift.employerId;
@@ -385,6 +415,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (minute % 1440 === 0) {
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         advanceDay(state.market); state.settledDay = now.day - 1;
+        if (state.populationEconomy) supplyDay(state, residents);
         const cutoff = minute - 14 * 1440;
         state.work.shifts = state.work.shifts.filter(s => !s.paid || s.endsAt >= cutoff);
         for (const store of [state.store, ...book.businesses.map(b => b.store)])
@@ -405,5 +436,5 @@ export function createSession(storage: Storage, npcSeed?: number) {
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
-  return { state, loadResult, tick, saveNow, ...social };
+  return { state, loadResult, tick, saveNow, startWork, ...social };
 }
