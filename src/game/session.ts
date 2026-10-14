@@ -4,21 +4,40 @@ import { companies } from '../data/companies';
 import { advanceClock, gameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
 import { restoreWorld } from '../sim/save';
-import { whereIs } from '../sim/npc';
+import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
-import { createMarket, advanceDay } from '../sim/market';
+import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
 import { createWorkState, finishWork } from '../sim/work';
-import { createStore, expireVisits } from '../sim/store';
-import { createShopState } from '../sim/shop';
+import { createStore, expireVisits, restock, visitStore } from '../sim/store';
+import { createShopState, useItem } from '../sim/shop';
 import { createRelationshipState } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
 import { createMatchmakingState, resolveMatch } from '../sim/matchmaking';
 import { axes, createBonds, seedLegacy } from '../sim/bonds';
 import { createDialogueState } from '../sim/dialogue';
 import { createRippleState } from '../sim/ripple';
+import { createPurse, funds, personAccount } from '../sim/purse';
+import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, type BusinessBook } from '../sim/business';
+import { jobs } from '../data/jobs';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60;
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
+const personalEmployer: Record<string, string> = { cafe: 'nuel', shop: 'sori', market: 'aro' };
+function createEconomy(world: ReturnType<typeof createWorld>) {
+  const { people, ledger } = world, now = gameTime(world.clock);
+  for (const n of npcs) people[n.id] ??= { id: n.id, name: n.name, role: 'npc', placeId: whereIs(n, now) };
+  people.player ??= { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
+  for (const id of ['player', ...npcs.map(n => n.id)]) ledger.balances[id] ??= id === 'player' ? 100 : 1000;
+  for (const [account, person] of Object.entries(personalEmployer)) if (Object.hasOwn(ledger.balances, account)) {
+    ledger.balances[person] += ledger.balances[account]; delete ledger.balances[account];
+  }
+  const purses = Object.fromEntries(['player', ...npcs.map(n => n.id)].map(id => [id, createPurse(people, ledger, id)]));
+  const book: BusinessBook = { businesses: [], employment: [] };
+  openBusiness(book, people, ledger, 'tea-counter', 'nuel', 'cafe', 2,
+    [{ itemId: 'tea', backroom: 300, displayed: 0, capacity: 5, price: 8 }], now);
+  for (const id of ['velo', 'lise']) hire(book, people, ledger, 'tea-counter', id, jobs[0], now);
+  return { purses, book, economyMinute: Math.floor(world.clock.totalMinutes), settledDay: now.day - 1 };
+}
 function freshState() {
   const world = createWorld();
   world.places = Object.fromEntries(places.map(p => [p.id, { ...p }]));
@@ -27,7 +46,7 @@ function freshState() {
     { id: n.id, name: n.name, role: 'npc' as const, placeId: whereIs(n, gameTime(world.clock)) }]));
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
   return { npcSeed: Math.floor(Math.random() * 0x100000000), world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
-    market: createMarket(), work: createWorkState(), store: createStore('player'),
+    ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
     dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds' };
@@ -106,14 +125,47 @@ export function createSession(storage: Storage) {
           state.world = restoreWorld(raw);
           state.player.placeId = state.world.people.player?.placeId ?? state.player.placeId;
           state.market.day = gameTime(state.world.clock).day;
-        } else if (parsed?.version === 2 || parsed?.version === 3) state = parsed.state;
+        } else if ([2, 3, 4].includes(parsed?.version)) state = parsed.state;
         else throw Error('Unsupported session version');
         state.npcSeed = parsed.version === 1 ? 0 : state.npcSeed ?? 0;
-        if (parsed.version !== 3) Object.assign(state, { dialogue: createDialogueState(), bonds: createBonds(),
+        if (parsed.version < 3) Object.assign(state, { dialogue: createDialogueState(), bonds: createBonds(),
           ripple: createRippleState(), relationMode: 'legacy' });
+        if (parsed.version < 4) Object.assign(state, createEconomy(state.world));
         checkShape(state, { ...freshState(), world: createWorld() });
-        if (parsed.version !== 3) state.bonds = seedLegacy(state.world, state.encounters);
+        if (parsed.version < 3) state.bonds = seedLegacy(state.world, state.encounters);
         checkSocial(state);
+        if (state.economyMinute !== Math.floor(state.world.clock.totalMinutes) ||
+            state.settledDay !== state.market.day - 1) throw Error('Invalid economic cursor');
+        for (const [id, purse] of Object.entries(state.purses)) {
+          if (purse.personId !== id || !personAccount(state.world.people, state.world.ledger, id)) throw Error('Invalid purse');
+          funds(state.world.ledger, purse);
+        }
+        const template = createEconomy(createWorld());
+        checkShape(state.book, template.book);
+        if (state.book.businesses.length !== 1 || state.book.employment.length !== 2) throw Error('Invalid business book');
+        checkShape(state.book.businesses[0], template.book.businesses[0]);
+        const b = state.book.businesses[0], expected = template.book.businesses[0];
+        if (b.id !== expected.id || b.ownerId !== expected.ownerId || b.placeId !== expected.placeId ||
+            b.store.accountId !== b.ownerId || b.capacity !== 2 || b.closedAt !== null ||
+            !Number.isSafeInteger(b.openedAt) || b.openedAt < 0 || b.openedAt > state.economyMinute) throw Error('Invalid business');
+        createStore(b.ownerId, b.store.stock);
+        for (const v of b.store.visits) {
+          checkShape(v, { id: '', actorId: '', need: { itemId: '', maxPrice: 0 }, joinedMinute: 0, patienceMinutes: 0, price: 0, status: '' });
+          if (!v.id || !state.purses[v.actorId] || !['waiting', 'paid', 'left'].includes(v.status) ||
+              ![v.joinedMinute, v.patienceMinutes, v.price, v.need.maxPrice].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid visit');
+        }
+        for (const e of b.store.events) {
+          checkShape(e, { visitId: '', actorId: '', itemId: '', time: { day: 1, hour: 0, minute: 0 }, reason: '', amount: 0 });
+          validateTime(e.time);
+          if (!state.purses[e.actorId] || !['purchased', 'missing', 'expensive', 'unaffordable', 'impatient'].includes(e.reason) ||
+              !Number.isSafeInteger(e.amount) || e.amount < 0) throw Error('Invalid sale');
+        }
+        state.book.employment.forEach((e, i) => {
+          checkShape(e, template.book.employment[i]);
+          if (e.actorId !== template.book.employment[i].actorId || e.businessId !== b.id || e.leftAt !== null ||
+              e.hiredAt !== b.openedAt || Object.entries(template.book.employment[i].job).some(([k, v]) =>
+                e.job[k as keyof typeof e.job] !== v)) throw Error('Invalid employment');
+        });
         generate(state.npcSeed, 0); // Validate the saved uint32 seed before accepting the save.
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
@@ -129,26 +181,62 @@ export function createSession(storage: Storage) {
       backup(); // Never overwrite a damaged save until its backup succeeds.
       if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
       const people = Object.fromEntries(Object.entries(state.world.people).filter(([id]) => !id.startsWith('generated-')));
-      storage.setItem(SESSION_KEY, JSON.stringify({ version: 3, state: { ...state, world: { ...state.world, people } } }));
+      storage.setItem(SESSION_KEY, JSON.stringify({ version: 4, state: { ...state, world: { ...state.world, people } } }));
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };
     } catch (error) { return { ok: false, error }; }
   };
   const tick = (realSeconds: number): SaveResult | undefined => {
     const days = advanceClock(state.world.clock, realSeconds);
-    for (const _day of days) advanceDay(state.market);
+    const target = state.world.clock.totalMinutes, { world, book, purses } = state, b = book.businesses[0];
+    for (let minute = state.economyMinute + 1; minute <= Math.floor(target); minute++) {
+      world.clock.totalMinutes = minute;
+      const now = gameTime(world.clock);
+      const payWages = () => {
+        for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute) {
+          shift.employerId = personalEmployer[shift.employerId] ?? shift.employerId;
+          if (book.employment.some(e => e.actorId === shift.actorId && e.job.id === shift.jobId))
+            payCompletedShift(book, world.people, world.ledger, b.id, shift, now);
+          else if (personAccount(world.people, world.ledger, shift.employerId) && personAccount(world.people, world.ledger, shift.actorId))
+            finishWork(state.work, world.ledger, shift.id, now);
+        }
+      };
+      payWages();
+      if (minute % 60 === 0) {
+        for (const npc of npcs) if (whereIs(npc, now) === b.placeId) {
+          const employment = book.employment.find(e => e.actorId === npc.id && e.leftAt === null);
+          if (employment && !state.work.shifts.some(s => s.actorId === npc.id &&
+              (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
+            startEmployeeShift(book, state.work, npc.id, b.placeId, now);
+          if (npc.id === b.ownerId) continue;
+          restock(b.store, 'tea', 5);
+          const visit = visitStore(b.store, world.ledger, `tea:${now.day}:${npc.id}`, npc.id,
+            { itemId: 'tea', maxPrice: 8 }, 1, now);
+          const sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
+          if (sale.ok && !sale.duplicate) {
+            const life = state.shop.residents[npc.id] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+            life.inventory.tea = (life.inventory.tea ?? 0) + 1; useItem(state.shop, npc.id, 'tea');
+          }
+        }
+        payWages();
+      }
+      if (minute % 1440 === 0) {
+        recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
+        advanceDay(state.market); state.settledDay = now.day - 1;
+      }
+      expireVisits(state.store, now);
+      for (const appointment of state.matchmaking.appointments) {
+        const npc = residents.find(n => n.id === appointment.npcId);
+        if (npc && (appointment.time.day - 1) * 1440 + appointment.time.hour * 60 + appointment.time.minute <= minute)
+          resolveMatch(appointment, state.encounters, npc, now,
+            { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) });
+      }
+      state.economyMinute = minute;
+    }
+    state.world.clock.totalMinutes = target;
     const now = gameTime(state.world.clock);
     for (const npc of residents) if (state.world.people[npc.id]) state.world.people[npc.id].placeId = whereIs(npc, now);
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
-    expireVisits(state.store, now);
-    for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= state.world.clock.totalMinutes)
-      finishWork(state.work, state.world.ledger, shift.id, now);
-    for (const appointment of state.matchmaking.appointments) {
-      const npc = residents.find(n => n.id === appointment.npcId);
-      if (npc && (appointment.time.day - 1) * 1440 + appointment.time.hour * 60 + appointment.time.minute <= state.world.clock.totalMinutes)
-        resolveMatch(appointment, state.encounters, npc, now,
-          { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) });
-    }
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
   return { state, loadResult, tick, saveNow };
