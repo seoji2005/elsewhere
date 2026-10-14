@@ -31,19 +31,20 @@ it('keeps completed wages in arrears, then pays once from customer revenue after
 it('requires paid producer orders and preserves goods and money on failures and retries', () => {
   const { state } = createSession({ getItem: () => null, setItem: () => {} }, 123);
   const { book, world: { people, ledger } } = state, b = book.businesses[0], stock = b.store.stock[0];
+  const initialBackroom = stock.backroom;
   const producer = generate(123, 50).find(n => n.job === producerJobs.tea)!;
   const time = { day: 1, hour: 0, minute: 0 }, owner = ledger.balances[b.ownerId], supplier = ledger.balances[producer.id];
   const order = (id: string, quantity = 5) => procure(book, people, ledger, b.id, producer, 'tea', quantity, 2, id, time);
   expect(procure(book, people, ledger, b.id, npcs[0], 'tea', 5, 2, 'wrong-job', time).ok).toBe(false);
   expect(procure(book, people, ledger, b.id, npcs[1], 'tea', 5, 2, 'self', time).ok).toBe(false);
-  expect(order('too-large', 100000).ok).toBe(false); expect(stock.backroom).toBe(0);
+  expect(order('too-large', 100000).ok).toBe(false); expect(stock.backroom).toBe(initialBackroom);
   expect(order('batch')).toEqual({ ok: true, duplicate: false });
   expect(order('batch')).toEqual({ ok: true, duplicate: true });
-  expect(order('batch', 6).ok).toBe(false); expect(stock.backroom).toBe(5);
+  expect(order('batch', 6).ok).toBe(false); expect(stock.backroom).toBe(initialBackroom + 5);
   expect(ledger.balances[b.ownerId]).toBe(owner - 10); expect(ledger.balances[producer.id]).toBe(supplier + 10);
   const restored = JSON.parse(JSON.stringify(book));
   expect(procure(restored, people, ledger, b.id, producer, 'tea', 5, 2, 'batch', time)).toEqual({ ok: true, duplicate: true });
-  expect(restored.businesses[0].store.stock[0].backroom).toBe(5);
+  expect(restored.businesses[0].store.stock[0].backroom).toBe(initialBackroom + 5);
   b.closedAt = 0; expect(order('closed').ok).toBe(false);
   expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
 });

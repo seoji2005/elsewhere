@@ -13,7 +13,9 @@ import { createMemoryState, rememberSharedEvent } from '../../src/sim/memory';
 import { buildDialogue } from '../../src/sim/dialogue';
 import { hire, openBusiness, startEmployeeShift } from '../../src/sim/business';
 import { jobs } from '../../src/data/jobs';
-import { producerJobs, revenueChange } from '../../src/sim/business';
+import { visitStore } from '../../src/sim/store';
+import { useItem } from '../../src/sim/shop';
+import { checkoutBusiness, producerJobs, revenueChange } from '../../src/sim/business';
 import { createPurse, dayCashflow } from '../../src/sim/purse';
 import { companies } from '../../src/data/companies';
 function memory(): Storage & { values: Map<string, string> } {
@@ -251,7 +253,7 @@ it.each([0, 1, 123, 0xffffffff])('runs a conserved, funded 56-resident economy f
     const staff = state.book.employment.filter(e => e.businessId === b.id);
     expect(staff).toHaveLength(b.capacity);
     expect(staff.every(e => residents.find(n => n.id === e.actorId)!.job === producerJob)).toBe(true);
-    expect(b.store.stock[0].backroom + b.store.stock[0].displayed).toBe(0);
+    expect(b.store.stock[0].backroom + b.store.stock[0].displayed).toBe(10);
   }
   const started = performance.now(), minima: Record<string, number> = {};
   for (let day = 1; day <= 30; day++) {
@@ -487,4 +489,68 @@ it.each([1, 31])('chooses preferred stock after the first slot and respects cata
   const purchases = session.state.book.businesses[0].store.events.filter(e => e.actorId === 'aro' && e.reason === 'purchased');
   expect(purchases.map(e => e.itemId)).toEqual(price === 1 ? ['lamp'] : []);
   expect(Object.values(session.state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+});
+
+it('buys first-night shelf and reserve stock from producers without creating money', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  session.tick(30);
+  for (const b of state.book.businesses) {
+    const stock = b.store.stock[0], orders = state.world.ledger.transactions.filter(t => t.reason.startsWith(`Procurement: ${b.id}:`));
+    expect(stock).toMatchObject({ displayed: 5, backroom: 5 });
+    expect(orders).toHaveLength(2); expect(orders.every(t => t.from === b.ownerId && t.amount > 0)).toBe(true);
+    const visit = visitStore(b.store, state.world.ledger, `first-night:${b.id}`, 'player',
+      { itemId: stock.itemId, maxPrice: stock.price }, 1, gameTime(state.world.clock));
+    expect(checkoutBusiness(state.book, state.world.people, state.world.ledger, b.id,
+      state.purses.player, visit.id, gameTime(state.world.clock)).ok).toBe(true);
+  }
+  expect(Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+});
+it('does not add opening stock to old saves and supplies empty stores at the next settlement', () => {
+  const storage = memory(), session = createSession(storage, 123);
+  session.tick(1439);
+  for (const b of session.state.book.businesses) b.store.stock[0].backroom = b.store.stock[0].displayed = 0;
+  session.saveNow(); const before = structuredClone(session.state), next = createSession(storage);
+  expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(before);
+  next.tick(1);
+  // Midnight customers can buy a paid batch before the daily reserve is supplied.
+  for (const b of next.state.book.businesses) {
+    const stock = b.store.stock[0];
+    const orders = next.state.world.ledger.transactions.slice(before.world.ledger.transactions.length)
+      .filter(t => t.reason.startsWith(`Procurement: ${b.id}:`));
+    const purchased = b.store.events.filter(e => e.time.day === 2 && e.reason === 'purchased').length;
+    expect(stock.displayed).toBe(5); expect(stock.backroom).toBeGreaterThanOrEqual(5);
+    expect(orders.every(t => t.from === b.ownerId && t.amount > 0)).toBe(true);
+    expect(stock.displayed + stock.backroom + purchased).toBe(orders.length * 5);
+  }
+  expect(Object.values(next.state.world.ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
+});
+it('drains awake energy, restores at night or home, clamps and preserves food recovery', () => {
+  const session = createSession(memory(), 123), { state } = session;
+  state.player.placeId = 'park'; session.tick(360);
+  expect(state.shop.residents.player.energy).toBeCloseTo(68);
+  session.tick(60); expect(state.shop.residents.player.energy).toBeCloseTo(67);
+  state.player.placeId = 'nest'; session.tick(60); expect(state.shop.residents.player.energy).toBeCloseTo(70);
+  state.shop.residents.player.energy = 99; session.tick(60); expect(state.shop.residents.player.energy).toBe(100);
+  state.player.placeId = 'park'; state.shop.residents.player.energy = .5;
+  session.tick(60); expect(state.shop.residents.player.energy).toBe(0);
+  state.shop.residents.player.inventory.tea = 1; useItem(state.shop, 'player', 'tea');
+  expect(state.shop.residents.player.energy).toBe(15);
+  state.world.clock.paused = true; session.tick(60); expect(state.shop.residents.player.energy).toBe(15);
+});
+it('rejects tired work without a shift and charges only actual work minutes across split saved ticks', () => {
+  const storage = memory(), whole = createSession(memory(), 123); let split = createSession(storage, 123);
+  for (const session of [whole, split]) {
+    session.tick(480.5); session.state.player.placeId = 'shop';
+    session.state.shop.residents.player.energy = 9;
+    expect(session.startWork('exchange-helper')).toEqual({ ok: false, error: '활력이 부족해요 (10 이상 필요)' });
+    expect(session.state.work.shifts.some(s => s.actorId === 'player')).toBe(false);
+    session.state.shop.residents.player.energy = 10;
+    expect(session.startWork('exchange-helper').ok).toBe(true);
+  }
+  whole.tick(120); split.tick(29.25); split.saveNow(); split = createSession(storage);
+  split.tick(30.75); split.tick(60);
+  expect(split.state).toEqual(whole.state); expect(whole.state.shop.residents.player.energy).toBe(0);
+  expect(whole.state.work.shifts.find(s => s.actorId === 'player')?.paid).toBe(true);
+  whole.state.shop.residents.player.energy = 50; whole.tick(60);
+  expect(whole.state.shop.residents.player.energy).toBeCloseTo(49);
 });
