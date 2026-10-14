@@ -15,3 +15,4 @@
 - 리서치 결과 위치: /home/dev/research/R00x/report.md, 대기열 QUEUE.md. 남은 것: R006 도시 그래픽(그림체 결정 뒤), R009 심즈·RimWorld 공개 자료
 - 체험판: https://3-34-132-123.sslip.io/ (이름 seoji), 올리기 ~/ops/bin/play-publish. 폰 실측: 해상도 2배에서 60fps
 - 2026-10-14 · C016 출입·C017 대화·기억·C018 내 가게 로직 합침(테스트 48). Codex 추론 수준 -e 옵션(이전엔 none으로 돌았음)
+- 2026-10-14 · C020 리세·C021 NPC 생성기(50명+)·C022 우연한 만남·소개팅 합침(테스트 70). 환경: vite·vitest configLoader runner
