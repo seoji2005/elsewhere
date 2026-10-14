@@ -2,21 +2,25 @@
 import { WebGLRenderer } from 'three';
 
 // Call sample(raw RAF delta in seconds); simulation-clamped delta hides stalls.
+// Quality ladder: when fps < 50, apply the next cheaper step (effects first, in the given order),
+// then lower the pixel ratio toward minDpr; at fps >= 58 undo the last step. Sharpness goes last.
 export function adaptiveResolution(renderer: WebGLRenderer,
   maxDpr = Math.min(window.devicePixelRatio || 1, 2.5), // phones are ~3x; 1.25 looked like 480p
-  onResize?: (dpr: number, width: number, height: number) => void) {
-  if (!(maxDpr > 0 && Number.isFinite(maxDpr))) throw new RangeError('Invalid DPR');
-  const previousDpr = renderer.getPixelRatio();
-  let width = 852, height = 393, multiplier = 1;
+  onResize?: (dpr: number, width: number, height: number) => void,
+  steps: ((cheaper: boolean) => void)[] = [], minDpr = Math.min(1.6, maxDpr)) {
+  if (!(maxDpr > 0 && Number.isFinite(maxDpr) && minDpr > 0 && minDpr <= maxDpr)) throw new RangeError('Invalid DPR');
+  const previousDpr = renderer.getPixelRatio(), dprStep = 0.15;
+  const top = steps.length + Math.ceil((maxDpr - minDpr) / dprStep - 1e-6);
+  let width = 852, height = 393, level = 0;
   let elapsed = 0, frames = 0, warmup = 2;
+  const dpr = () => Math.max(minDpr, maxDpr - dprStep * Math.max(0, level - steps.length));
   function apply() {
-    const dpr = maxDpr * multiplier;
-    renderer.setPixelRatio(dpr);
+    renderer.setPixelRatio(dpr());
     renderer.setSize(width, height, false);
-    onResize?.(dpr, width, height);
+    onResize?.(dpr(), width, height);
   }
   apply();
-  return { resize(w: number, h: number) {
+  return { get level() { return level; }, resize(w: number, h: number) {
     if (!(w > 0 && h > 0 && Number.isFinite(w + h))) return;
     width = w; height = h; apply();
   }, sample(dt: number) {
@@ -25,11 +29,14 @@ export function adaptiveResolution(renderer: WebGLRenderer,
     if (warmup > 0) { warmup -= dt; return; }
     elapsed += dt; frames++;
     if (elapsed < 4) return;
-    const fps = frames / elapsed;
-    const next = fps < 50 ? Math.max(0.5, multiplier - 0.1)
-      : fps >= 58 ? Math.min(1, multiplier + 0.05) : multiplier;
+    const fps = frames / elapsed, previous = level;
     elapsed = frames = 0;
-    if (Math.abs(next - multiplier) > 0.001) { multiplier = next; apply(); }
+    if (fps < 50 && level < top) level++;
+    else if (fps >= 58 && level > 0) level--;
+    if (level === previous) return;
+    const step = Math.min(level, previous); // the one step that changed
+    if (step < steps.length) steps[step](level > previous);
+    else apply();
   }, dispose() {
     renderer.setPixelRatio(previousDpr);
     onResize?.(previousDpr, width, height);

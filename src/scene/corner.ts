@@ -1,6 +1,42 @@
 import * as T from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { loadAssets } from '../render/assets';
 import { streetProps } from './props';
+
+// Bake static meshes into one mesh per material and 24 m cell: the city costs a few dozen draw calls
+// instead of hundreds, while cells out of view are still culled. Positions are baked in world space,
+// so each source mesh keeps its window pattern through a per-vertex seed (looks.ts).
+function mergeStatic(scene: T.Scene) {
+  scene.updateMatrixWorld(true);
+  const buckets = new Map<string, { mesh: T.Mesh; parts: T.BufferGeometry[] }>(), center = new T.Vector3();
+  const sources: T.Mesh[] = [];
+  scene.traverse(object => {
+    if (!(object instanceof T.Mesh) || object instanceof T.InstancedMesh || Array.isArray(object.material)) return;
+    const source: T.BufferGeometry = object.geometry, geometry = new T.BufferGeometry();
+    for (const [name, attribute] of Object.entries(source.attributes)) { // quantized glTF data -> float
+      const { count, itemSize } = attribute, array = new Float32Array(count * itemSize);
+      for (let i = 0; i < count; i++) for (let c = 0; c < itemSize; c++) array[i * itemSize + c] = attribute.getComponent(i, c);
+      geometry.setAttribute(name, new T.BufferAttribute(array, itemSize));
+    }
+    if (source.index) geometry.setIndex(source.index);
+    geometry.applyMatrix4(object.matrixWorld);
+    const e = object.matrixWorld.elements, count = geometry.attributes.position.count;
+    geometry.setAttribute('seed', new T.BufferAttribute(new Float32Array(count).fill(e[12] + 1.7 * e[14]), 1));
+    geometry.computeBoundingBox();
+    geometry.boundingBox!.getCenter(center);
+    const key = [object.material.uuid, object.castShadow, object.receiveShadow, !!source.index,
+      Object.keys(source.attributes).sort(), Math.floor(center.x / 24), Math.floor(center.z / 24)].join();
+    if (!buckets.has(key)) buckets.set(key, { mesh: object, parts: [] });
+    buckets.get(key)!.parts.push(geometry);
+    sources.push(object);
+  });
+  sources.forEach(mesh => mesh.removeFromParent());
+  for (const { mesh, parts } of buckets.values()) {
+    const merged = new T.Mesh(mergeGeometries(parts), mesh.material);
+    merged.name = mesh.name; merged.castShadow = mesh.castShadow; merged.receiveShadow = mesh.receiveShadow;
+    scene.add(merged);
+  }
+}
 
 // Soft contact shade around every footprint so buildings and props sit on the ground;
 // one vertex-alpha mesh (a single draw call), darkest at the base and fading outwards.
@@ -80,6 +116,7 @@ export async function buildCorner(scene: T.Scene) {
   const types = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
   const background = new T.Group();
   scene.add(background);
+  const tints = new Map<string, T.MeshStandardMaterial>(); // one tinted brick per building type, so merging can share it
   for (const [i, x, z, rotation] of [
     [0, -29, -11, 0], [1, -39, -11, 0], [2, -10, -34, Math.PI / 2],
     [0, -21, -27, 0], [1, -32, -27, 0], [2, -44, -28, 0],
@@ -93,8 +130,9 @@ export async function buildCorner(scene: T.Scene) {
       if (!(child instanceof T.Mesh)) return;
       const vary = (material: T.Material) => {
         if (!(material instanceof T.MeshStandardMaterial) || !/brick/i.test(material.name)) return material;
-        const tint = material.clone();
-        tint.color.multiply(new T.Color(['#d2bbb0', '#b0b9c7', '#e4ceb2'][i]));
+        const key = material.uuid + i, tint = tints.get(key) ?? material.clone();
+        if (!tints.has(key)) tint.color.multiply(new T.Color(['#d2bbb0', '#b0b9c7', '#e4ceb2'][i]));
+        tints.set(key, tint);
         return tint;
       };
       child.material = Array.isArray(child.material) ? child.material.map(vary) : vary(child.material);
@@ -129,5 +167,6 @@ export async function buildCorner(scene: T.Scene) {
       object.receiveShadow = true;
     }
   });
+  mergeStatic(scene);
   return { solids, walls, doors };
 }

@@ -20,7 +20,7 @@ function instances(scene: T.Scene, source: T.Object3D, scale: T.Vector3, spots: 
   return spots.map(([x, z, r, y = 0.11]) => bounds.clone().applyMatrix4(matrix(x, y, z, r, scale)));
 }
 
-function paint(width: number, height: number, draw: (g: CanvasRenderingContext2D) => void) {
+export function paint(width: number, height: number, draw: (g: CanvasRenderingContext2D) => void) {
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   draw(canvas.getContext('2d')!);
@@ -37,9 +37,10 @@ function sign(scene: T.Scene, text: string, x: number, y: number, z: number) {
     g.fillStyle = '#ffe2a8'; g.font = 'bold 64px sans-serif'; g.textAlign = 'center';
     [...text].forEach((letter, i) => g.fillText(letter, 64, 96 + i * 76));
   });
-  const board = new T.Mesh(new T.BoxGeometry(0.08, 1.5, 0.75), [1, 1, 0, 0, 0, 0].map(i => i
-    ? new T.MeshBasicMaterial({ map: texture, color: new T.Color(1.6, 1.6, 1.6) })
-    : new T.MeshLambertMaterial({ color: '#2a2622' })));
+  const box = new T.BoxGeometry(0.08, 1.5, 0.75); // faces ±x carry the lettering: two groups = two draw calls
+  box.clearGroups(); box.addGroup(0, 12, 0); box.addGroup(12, 24, 1);
+  const board = new T.Mesh(box, [new T.MeshBasicMaterial({ map: texture, color: new T.Color(1.6, 1.6, 1.6) }),
+    new T.MeshLambertMaterial({ color: '#2a2622' })]);
   board.position.set(x, y, z); scene.add(board);
 }
 

@@ -6,13 +6,21 @@ import { cornerPalette } from '../render/palette';
 function grounded(material: MeshStandardMaterial, windows: boolean) {
   if (windows) material.defines = { ...material.defines, WINDOWS: '' };
   material.onBeforeCompile = shader => {
-    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vGround;')
+    // Window pattern seed: per source mesh, baked as the seed attribute when corner.ts merges meshes.
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
+        varying vec2 vGround;
+        #ifdef WINDOWS
+        attribute float seed;
+        #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vec4 ground = vec4(transformed, 1.);
         #ifdef USE_INSTANCING
         ground = instanceMatrix * ground;
         #endif
-        vGround = vec2((modelMatrix * ground).y, modelMatrix[3].x + 1.7 * modelMatrix[3].z);`);
+        vGround = vec2((modelMatrix * ground).y, modelMatrix[3].x + 1.7 * modelMatrix[3].z);
+        #ifdef WINDOWS
+        vGround.y = seed;
+        #endif`);
     shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vGround;')
       .replace('#include <map_fragment>', `#include <map_fragment>
         diffuseColor.rgb *= mix(.4, 1., smoothstep(.12, 1.4, vGround.x)) * (1. + .16 * smoothstep(3., 15., vGround.x));`)
