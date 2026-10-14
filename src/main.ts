@@ -88,7 +88,8 @@ if (blob) cast.forEach(person => {
 controls.state.dist = Number(query.get('dist')) || controls.state.dist;
 controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
 const move = Number(query.get('move')) || 0;
-const follow = followPlayer(character.group, camera, world);
+const follow = followPlayer(character.group, camera, world,
+  anime ? (character as Awaited<ReturnType<typeof loadAvatar>>).focusHeight : 1.4);
 // Anime: the sun comes from behind the default view, so the façades in sight are lit and shadows fall away.
 const sunElevation = day ? 36 : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
 toSun.y = Math.tan(sunElevation * Math.PI / 180) * Math.hypot(toSun.x, toSun.z);

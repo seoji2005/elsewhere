@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, prune, dedup, textureCompress, meshopt, unpartition } from '@gltf-transform/functions';
-import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
+import { MeshoptEncoder, MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest = JSON.parse(await readFile(join(root, 'assets/manifest.json'), 'utf8'));
-await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready]);
+await Promise.all([MeshoptEncoder.ready, MeshoptDecoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({
   'meshopt.encoder': MeshoptEncoder, 'meshopt.decoder': MeshoptDecoder,
 });
@@ -43,6 +43,40 @@ async function shrinkVrm(file, output, maxSize) {
     if (mesh.weights) mesh.weights = list.map(i => mesh.weights[i]);
     if (mesh.extras?.targetNames) mesh.extras.targetNames = list.map(i => mesh.extras.targetNames[i]);
   });
+  // Hair only: retain authored vertices/UVs/skin weights and all VRM spring nodes; replace indices only.
+  // Lock strand borders and joint-palette transitions so disconnected strands keep their outline and deformation.
+  const array = i => {
+    const a = json.accessors[i], bytes = data(a.bufferView), n = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[a.type];
+    const Type = { 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array }[a.componentType];
+    return new Type(bytes.buffer, bytes.byteOffset + (a.byteOffset ?? 0), a.count * n);
+  };
+  for (const mesh of json.meshes.filter(mesh => /^Hair/i.test(mesh.name))) {
+    let before = 0, after = 0;
+    for (const p of mesh.primitives) {
+      const indices = new Uint32Array(array(p.indices)), positions = array(p.attributes.POSITION);
+      const normals = array(p.attributes.NORMAL), uv = array(p.attributes.TEXCOORD_0);
+      const weights = array(p.attributes.WEIGHTS_0), joints = array(p.attributes.JOINTS_0);
+      const count = positions.length / 3, attributes = new Float32Array(count * 9), lock = new Uint8Array(count);
+      for (let v = 0; v < count; v++) {
+        attributes.set(normals.subarray(v * 3, v * 3 + 3), v * 9);
+        attributes.set(uv.subarray(v * 2, v * 2 + 2), v * 9 + 3);
+        attributes.set(weights.subarray(v * 4, v * 4 + 4), v * 9 + 5);
+      }
+      for (let i = 0; i < indices.length; i += 3) for (let e = 0; e < 3; e++) {
+        const a = indices[i + e], b = indices[i + (e + 1) % 3];
+        if (joints.subarray(a * 4, a * 4 + 4).some((joint, c) => joint !== joints[b * 4 + c])) lock[a] = lock[b] = 1;
+      }
+      const [reduced, error] = MeshoptSimplifier.simplifyWithAttributes(indices, positions, 3, attributes, 9,
+        [0.5, 0.5, 0.5, 1, 1, 1, 1, 1, 1], lock, Math.floor(indices.length / 6) * 3, 0.01, ['LockBorder']);
+      const a = json.accessors[p.indices];
+      raw.set(a.bufferView, new Uint8Array(reduced.buffer, reduced.byteOffset, reduced.byteLength));
+      Object.assign(a, { componentType: 5125, count: reduced.length });
+      delete a.byteOffset; delete a.min; delete a.max;
+      before += indices.length / 3; after += reduced.length / 3;
+      console.log(`${basename(file)} ${mesh.name}: error=${error.toFixed(6)}`);
+    }
+    console.log(`${basename(file)} hair triangles: ${before} -> ${after} (${(100 * after / before).toFixed(1)}%)`);
+  }
   // Quantize (KHR_mesh_quantization; model.ts expands them back to floats): positions int16 over +-2 m, normals int8,
   // UVs and skin weights uint16. Morph deltas use half the scale so +-2 fits. Unreferenced accessors are emptied.
   const roles = new Map(json.skins.map(skin => [skin.inverseBindMatrices, 'IBM']));
