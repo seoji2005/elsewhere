@@ -55,6 +55,12 @@ try {
 
   step = '내 마음 선택: 호감 표시와 선택 상태 변경';
   const feelings = panel.locator('.hud-chips').filter({ hasText: '내 마음' });
+  assert.match(await feelings.innerText(), /내 마음 · 아직 정하지 않음/, '미선택 마음을 친구로 표시하면 안 됨');
+  for (const label of ['친구', '호감', '사랑']) {
+    const choice = feelings.getByRole('button', { name: label, exact: true });
+    assert.equal(await choice.getAttribute('aria-pressed'), 'false', '미선택이면 모든 버튼이 선택 해제되어야 함');
+    assert.equal(await choice.evaluate(element => element.classList.contains('on')), false);
+  }
   await feelings.getByRole('button', { name: '호감', exact: true }).tap();
   assert.match(await feelings.innerText(), /내 마음 · 호감/, '선택한 내 마음이 호감으로 표시되어야 함');
   assert.equal(await feelings.getByRole('button', { name: '호감', exact: true }).getAttribute('aria-pressed'), 'true');
