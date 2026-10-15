@@ -10,6 +10,7 @@ import { adaptiveResolution } from './render/resolution';
 import { CheapBloom } from './render/cheapBloom';
 import { ToonEdges } from './render/outline';
 import { duskLUT } from './render/duskLUT';
+import { time, tone, spots } from './render/style';
 import { loadCharacter } from './player/character';
 import { loadAvatar } from './anime/avatar';
 import { outfits } from './anime/wardrobe';
@@ -27,8 +28,8 @@ import { doors } from './data/doors';
 import { generate } from './sim/npcgen';
 
 const query = new URLSearchParams(location.search);
-// style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
-const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
+// style=anime (default: VRM hero, toon city, time=day|dusk|night) or style=current (the look A/B corner as before).
+const anime = query.get('style') !== 'current', day = anime && time === 'day';
 const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 0; // user 2026-10-15: 6.5–7 heads
 const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
 // Anime city plans (C033): toon=a hard cel with screen-space outlines (default), toon=b soft illustration.
@@ -37,7 +38,8 @@ const toon = query.get('toon') === 'b' ? 'b' : 'a';
 // msaa=0|4, bloom=0|1, lut=0|1, shadow=off|static|dynamic, dpr=<fixed pixel ratio>.
 // A switch given in the URL is left alone by the automatic quality ladder.
 const msaa = Number(query.get('msaa') ?? (look === 'a' ? 4 : 0)) > 0 ? 4 : 0;
-const bloom = query.get('bloom') !== '0', grade = query.get('lut') === '1' || (!anime && query.get('lut') !== '0');
+// STYLE §4: no bloom by day (threshold 99 in the time table).
+const bloom = query.get('bloom') === '1' || query.get('bloom') !== '0' && !(anime && tone.bloom > 10), grade = query.get('lut') === '1' || (!anime && query.get('lut') !== '0');
 const shadow = (['off', 'static', 'dynamic'] as const).find(mode => mode === query.get('shadow')) ?? 'static';
 const fixedDpr = Number(query.get('dpr')) > 0 ? Math.min(4, Number(query.get('dpr'))) : undefined;
 const post = look === 'b' && (bloom || grade || (anime && toon === 'a')); // A's outline pass needs the composer
@@ -59,7 +61,7 @@ if (anime && query.get('cast') === '1') {
   // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
   for (let i = 1; i < outfits.length; i++) cast.push(await loadAvatar(camera, sd, outfits[i], i * 0.47));
 }
-applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6, toon, day ? 3.2 : 3); // sun power as set below
+applyLook(scene, anime ? 'anime' : look, anime ? tone.windows : 1.6, toon);
 if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
 scene.add(character.group);
@@ -130,21 +132,28 @@ if (blob) cast.forEach(person => {
   scene.add(contact);
 });
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
-controls.state.dist = Number(query.get('dist')) || (anime ? 10 : controls.state.dist); // telephoto: stand further back
-controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
+// Anime default (STYLE §7): eye-level street walk, 7 m back and 14° down, the upper third sky and rooftops.
+controls.state.dist = Number(query.get('dist')) || (anime ? 7 : controls.state.dist);
+controls.state.pitch = Number(query.get('pitch')) || (anime ? 0.25 : controls.state.pitch);
+// ?spot=A..E (STYLE §7 presets for photos and the §9 sheet): the player stands there and the camera holds the
+// preset view until the stick or an orbit drag moves.
+const spot = anime ? spots[query.get('spot') ?? ''] : undefined, startYaw = controls.state.yaw;
+let held = !!spot;
+if (spot) { character.group.position.set(spot.at[0], 0, spot.at[1]); character.group.rotation.y = spot.at[2]; }
 const move = Number(query.get('move')) || 0;
 const follow = followPlayer(character.group, camera, world,
   anime ? (character as Awaited<ReturnType<typeof loadAvatar>>).focusHeight : 1.4);
 // Anime: the sun comes from behind the default view, so the façades in sight are lit and shadows fall away.
-const sunElevation = day ? 36 : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
+const sunElevation = anime ? tone.elevation : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
 toSun.y = Math.tan(sunElevation * Math.PI / 180) * Math.hypot(toSun.x, toSun.z);
 const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 22, 1024, shadow, toSun); // follows the player
 lighting.fill.intensity = look === 'a' ? 0.85 : 1.7;
-if (anime) { // warm-white afternoon sun over a sky-blue fill, or a low orange sun under a lavender sky
-  lighting.sun.color.set(day ? '#fff0d9' : '#ffaa70');
-  lighting.sun.intensity = day ? 3.2 : 3;
-  lighting.fill.color.set(day ? '#b5d4ff' : '#a7a0dc');
-  lighting.fill.groundColor.set(day ? '#a8957f' : '#7a5c5c');
+if (anime) { // STYLE §2: afternoon sun over a sky-blue fill, low orange sun under lavender, or moon only at night
+  lighting.sun.color.copy(tone.sun);
+  lighting.sun.intensity = tone.power;
+  lighting.fill.color.copy(tone.fill[0]);
+  lighting.fill.groundColor.copy(tone.fill[1]);
+  lighting.fill.intensity = tone.fillPower;
 }
 if (look === 'b' && !(anime && toon === 'a')) { // cool sky bounce from the side away from the sun (not in the two-step cel)
   const bounce = new T.DirectionalLight('#8fa5d9', 0.8);
@@ -152,8 +161,7 @@ if (look === 'b' && !(anime && toon === 'a')) { // cool sky bounce from the side
   scene.add(bounce);
 }
 // Sky gradient: zenith, horizon (= fog), band above the horizon, sun glow.
-const [top, horizon, band, glow] = anime ? day ? ['#2f72d4', '#d4e8f6', '#8cc0f0', '#fff0c8']
-  : ['#3a4b8c', '#f7b796', '#c99bc8', '#ff9a52'] : [look === 'a' ? '#7296bd' : '#33497d', look === 'a' ? '#d9b499' : '#cfa898',
+const [top, horizon, band, glow] = anime ? [tone.sky[0], tone.sky[2], tone.sky[1], tone.glow] : [look === 'a' ? '#7296bd' : '#33497d', look === 'a' ? '#d9b499' : '#cfa898',
   '#9c84b0', '#ff9a52'];
 cornerAtmosphere(scene, horizon, 48, 155);
 const sky = new T.Mesh(new T.SphereGeometry(300, 48, 24), new T.ShaderMaterial({
@@ -166,7 +174,7 @@ const sky = new T.Mesh(new T.SphereGeometry(300, 48, 24), new T.ShaderMaterial({
   fragmentShader: `varying vec3 dir; uniform vec3 top,horizon,band,glow,sun;
     void main(){vec3 d=normalize(dir);
     ${look === 'a' ? 'vec3 c=mix(horizon,top,smoothstep(0.,.75,d.y));' : `float h=max(d.y,0.),s=max(dot(d,sun),0.);
-    vec3 c=mix(mix(horizon,band,smoothstep(0.,.22,h)),top,smoothstep(.1,.5,h));
+    vec3 c=mix(mix(horizon,band,smoothstep(0.,${anime ? '.06' : '.22'},h)),top,smoothstep(${anime ? '.06,.2' : '.1,.5'},h));
     c+=glow*(.7*pow(s,4.)+1.4*pow(s,60.))*smoothstep(0.,.07,h)*(1.-smoothstep(.05,.4,h));
     c+=(fract(sin(dot(gl_FragCoord.xy,vec2(12.99,78.23)))*43758.5)-.5)/255.;`}
     gl_FragColor=vec4(c,1.);
@@ -176,7 +184,7 @@ const sky = new T.Mesh(new T.SphereGeometry(300, 48, 24), new T.ShaderMaterial({
 }));
 sky.frustumCulled = false;
 scene.add(sky);
-if (anime) sky.add(cloudCards(day ? '#ffffff' : '#ffc6b4'));
+if (anime) sky.add(cloudCards(tone.clouds));
 if (look === 'a') {
   const pmrem = new T.PMREMGenerator(renderer);
   const room = new RoomEnvironment();
@@ -187,6 +195,7 @@ if (look === 'a') {
 // Look B post: HDR scene (no MSAA by default; the high pixel ratio keeps edges clean) -> quarter-res bloom
 // (windows, lamps) -> one full-screen pass: add glow, tone map, dusk LUT grade, sRGB to the screen.
 const edges = anime && toon === 'a' ? new ToonEdges(camera) : undefined; // reads the scene depth, so the scene target keeps a depth texture
+edges?.material.uniforms.ink.value.copy(tone.ink);
 const composer = post ? new EffectComposer(renderer, new T.WebGLRenderTarget(1, 1, { type: T.HalfFloatType, samples: msaa,
   ...(edges ? { depthTexture: new T.DepthTexture(1, 1) } : {}) })) : undefined;
 // The composer clones the target, and clones share one GL texture (same Source): the edge pass would then write into
@@ -197,6 +206,8 @@ if (composer && finalPass) {
   renderer.toneMapping = T.NoToneMapping; // the LUT pass compresses HDR itself
   [new RenderPass(scene, camera), bloomPass, edges, finalPass].forEach(pass => pass && composer.addPass(pass));
   finalPass.glow(bloomPass?.glow ?? null);
+  // Lit white cloth and plaster peak near 1.2 (HDR): only lamps, lit windows and neon pass 1.4 (STYLE §4 bloom).
+  if (anime && bloomPass) bloomPass.material.uniforms.threshold.value = tone.bloom;
   if (anime) { finalPass.material.defines.NEUTRAL = ''; finalPass.uniforms.exposure.value = 1; }
 }
 renderer.info.autoReset = false; // keep whole-frame counts for diagnostics
@@ -223,8 +234,10 @@ let previous = performance.now(), positionElapsed = 0, status = { speed: 0, near
 renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
-  status = follow(Math.min(dt, 0.1), talk.active() ? { x: 0, y: 0 } : move ? { x: 0, y: move } : controls.stickInput(),
-    controls.state, talk.closeup());
+  const input = talk.active() ? { x: 0, y: 0 } : move ? { x: 0, y: move } : controls.stickInput();
+  status = follow(Math.min(dt, 0.1), input, controls.state, talk.closeup());
+  held &&= !input.x && !input.y && controls.state.yaw === startYaw && !talk.active();
+  if (held && spot) { camera.position.set(...spot.eye); camera.lookAt(...spot.aim); }
   talk.update(dt);
   lighting.follow(character.group.position);
   character.update(status.speed, Math.min(dt, 0.1));
@@ -247,5 +260,5 @@ Object.assign(window, { cornerDiagnostics: () => ({ look, toon, style: anime ? '
   sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
-  sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
+  time, spot: held ? query.get('spot') : '', sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
   player: character.group.position.toArray(), place: session.state.player.placeId, ...status }) });

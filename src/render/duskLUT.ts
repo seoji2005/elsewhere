@@ -31,7 +31,8 @@ export function duskLUT(size = 16, grade = true) {
       uniform sampler2D tDiffuse,tGlow; uniform sampler3D lut;
       uniform float size,intensity,exposure,strength; varying vec2 vUv; out vec4 outColor;
       vec3 encode(vec3 x){return mix(12.92*x,1.055*pow(x,vec3(1./2.4))-.055,step(vec3(.0031308),x));}
-      vec3 neutral(vec3 c){float x=min(c.r,min(c.g,c.b)),p;c-=x<.08?x-6.25*x*x:.04;p=max(c.r,max(c.g,c.b)); // Khronos PBR Neutral
+      vec3 neutral(vec3 c){float p=max(c.r,max(c.g,c.b)); // Khronos PBR Neutral's shoulder only: its toe crushed dark
+        // albedos in shade (and line ink) to black and broke the shade multiplier (STYLE §2, §9-3)
         if(p<.76)return c;float n=1.-.0576/(p-.52);return mix(c*n/p,vec3(n),1.-1./(.15*(p-n)+1.));}
       void main(){vec4 source=texture(tDiffuse,vUv);
         #ifdef GLOW
@@ -39,7 +40,7 @@ export function duskLUT(size = 16, grade = true) {
         #endif
         vec3 hdr=max(source.rgb*exposure,vec3(0.));
         #ifdef NEUTRAL
-        vec3 srgb=encode(neutral(hdr)); // anime: keeps mid-tone colours as authored, rolls off only the highlights
+        vec3 srgb=encode(neutral(hdr)); // anime: keeps colours as authored, rolls off only the highlights
         srgb=mix(vec3(dot(srgb,vec3(.2126,.7152,.0722))),srgb,1.15); // and a touch more saturation
         #else
         vec3 srgb=encode(hdr/(vec3(1.)+hdr));
