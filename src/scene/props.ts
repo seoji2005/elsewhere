@@ -98,7 +98,7 @@ export async function streetProps(scene: T.Scene, city: T.Group, heroes: T.Objec
   sign(scene, '카페', -19.5, 4.4, facade(-19.5) + 0.42);
   sign(scene, '잔물결 찻방', -12.6, 3.4, facade(-12.6) + 0.42); // the tea house behind the cafe door (data/places)
   const seats = instances(scene, find(street, 'bench'), new T.Vector3(3.6, 1.8, 1.8),
-    [[-19.5, facade(-19.5) + 0.75, Math.PI], [-28.6, facade(-28.6) + 0.75, Math.PI]]);
+    [[-20.94, facade(-19.5) + 0.75, 0], [-28.6, facade(-28.6) + 0.75, Math.PI]]);
   const pots = instances(scene, find(street, 'pottedPlant'), new T.Vector3(1.7, 1.7, 1.7),
     [[-23.3, facade(-23.3) + 0.35, 0], [-15.8, facade(-15.8) + 0.35, 0], [-11.8, facade(-11.8) + 0.35, 0]]);
   instances(scene, find(city, 'Prop_ManholeCover'), new T.Vector3(1, 1, 1), [[2.2, -14, 0, 0], [-15, 2, 0, 0]]);

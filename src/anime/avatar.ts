@@ -133,15 +133,89 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   const [idle, walk, run] = ['Idle_Loop', 'Walk_Loop', 'Jog_Fwd_Loop'].map(name =>
     mixer.clipAction(retarget(motion.animations.find(clip => clip.name === name)!, rig, vrm, scale, hipsOffset)).play());
   idle.time = phase % idle.getClip().duration;
+  // Life actions (C083): sit on a bench, buy at a counter, chat standing. The UAL clips are used when the people bundle
+  // has them; until tools/assets.mjs re-embeds them, Idle_Loop-based stand-ins (TEMPORARY) pose the same states.
+  const flip = vrm.meta.metaVersion === '0' ? -1 : 1, base = idle.getClip(), q = new T.Quaternion();
+  const role = new Map(Object.keys(vrm.humanoid.humanBones).map(name =>
+    [vrm.humanoid.getNormalizedBoneNode(name as VRMHumanBoneName)?.name, name]));
+  const turn = (x: number) => q.setFromEuler(new T.Euler(x * flip, 0, 0)); // negative x swings a limb forward
+  const named = (name: string) => motion.animations.find(clip => clip.name === name);
+  const standIn = (name: string, pose: Record<string, (q: T.Quaternion, t: number) => void>, seat?: [y: number, ahead: number]) =>
+    new T.AnimationClip(name, base.duration, base.tracks.map(track => {
+      const [bone, property] = track.name.split('.'), edit = pose[role.get(bone) ?? ''], values = track.values.slice();
+      if (property === 'position' && seat)
+        for (let i = 0; i < values.length; i += 3) values.set([track.values[0], seat[0], track.values[2] + seat[1] * flip], i);
+      if (property === 'quaternion' && edit) for (let i = 0; i < values.length; i += 4) {
+        const rest = new T.Quaternion().fromArray(values, i);
+        edit(rest, track.times[i / 4] / base.duration); rest.toArray(values, i);
+      }
+      return new (track.constructor as typeof T.KeyframeTrack)(track.name, track.times, values);
+    }));
+  const action = (clip: T.AnimationClip, once = false) => {
+    const next = mixer.clipAction(clip);
+    next.setLoop(once ? T.LoopOnce : T.LoopRepeat, Infinity).clampWhenFinished = once;
+    next.weight = 0; next.play(); life.add(next);
+    return next;
+  };
+  const clip = (name: string, fallback?: () => T.AnimationClip, once = false) => {
+    const source = named(name), made = source ? retarget(source, rig, vrm, scale, hipsOffset) : fallback?.();
+    return made && action(made, once);
+  };
+  const life = new Set<T.AnimationAction>(), arms = (a: number) => (r: T.Quaternion) => r.premultiply(turn(-a));
+  // Seated stand-in: hip joints over the seat, thighs from there toward rest knee height (at most 30° down), shins upright,
+  // feet flat; short SD thighs slide forward so the knees still clear the seat's front edge (16 cm ahead of the spot).
+  const y = (name: VRMHumanBoneName) => vrm.humanoid.getRawBoneNode(name)!.getWorldPosition(v).y;
+  vrm.humanoid.update(); vrm.scene.updateMatrixWorld(true);
+  const hipY = y('leftUpperLeg'), kneeY = y('leftLowerLeg'), restHips = hips.position.y, restY = vrm.scene.position.y;
+  hips.position.y += 0.1; vrm.humanoid.update(); vrm.scene.updateMatrixWorld(true);
+  const lift = (y('leftUpperLeg') - hipY) / 0.1; // world metres per normalized hips unit
+  hips.position.y = restHips; vrm.humanoid.update();
+  const seats = new Map<number, T.AnimationAction | undefined>(), seated = (seat: number) => {
+    if (!seats.has(seat)) {
+      const length = hipY - kneeY, joint = seat + 0.09 * bodyScale, down = Math.asin(T.MathUtils.clamp((joint - kneeY) / length, -0.3, 0.5));
+      const bend = Math.PI / 2 - down, ahead = Math.max(0, 0.16 - length * Math.cos(down));
+      const thigh = (r: T.Quaternion) => r.copy(turn(-bend)), shin = (r: T.Quaternion) => r.copy(turn(bend));
+      seats.set(seat, clip('Sitting_Idle_Loop', () => standIn('Sitting_Idle_Loop', { leftUpperLeg: thigh, rightUpperLeg: thigh,
+        leftLowerLeg: shin, rightLowerLeg: shin, leftFoot: r => r.identity(), rightFoot: r => r.identity(),
+        leftUpperArm: arms(0.5), rightUpperArm: arms(0.5) }, [restHips + (joint - hipY) / lift, ahead / lift])));
+    }
+    return seats.get(seat);
+  };
+  const enter = clip('Sitting_Enter', undefined, true), exit = clip('Sitting_Exit', undefined, true);
+  const buy = clip('Interact', () => standIn('Interact', {
+    rightUpperArm: (r, t) => r.premultiply(turn(-1.2 * Math.sin(Math.PI * t) ** 2)) }));
+  const talk = clip('Idle_Talking_Loop', () => standIn('Idle_Talking_Loop', { leftUpperArm: arms(0.15),
+    rightUpperArm: (r, t) => r.premultiply(turn(-0.45 - 0.2 * Math.sin(4 * Math.PI * t))),
+    neck: (r, t) => r.premultiply(turn(0.06 * Math.sin(2 * Math.PI * t))) }));
+  type Activity = 'stand' | 'sit' | 'talk' | 'buy';
+  const FADE = 0.6; // s, between activities and into a following clip
+  let activity: Activity = 'stand', steps: T.AnimationAction[] = [], mouth = 0;
+  const begin = () => { if (steps[0] && steps[0].weight < 0.01) steps[0].reset(); };
   if (vrm.lookAt) vrm.lookAt.target = camera;
   const group = new T.Group().add(vrm.scene), face = vrm.expressionManager;
   group.name = outfit.name;
   let time = phase, blinkAt = phase + 1.5 + phase * 0.3, smileAt = 3, first = true;
-  return { group, focusHeight, update(speed: number, dt: number) {
+  return { group, focusHeight, activity: () => activity,
+    // seat: seat top above the feet' ground (m). Leaving a seat plays Sitting_Exit first when present.
+    act(next: Activity, seat = 0.43) {
+      if (next === activity) return;
+      steps = [...activity === 'sit' && exit ? [exit] : [],
+        ...[next === 'sit' && enter, next === 'sit' && seated(seat), next === 'talk' && talk, next === 'buy' && buy]
+          .filter((step): step is T.AnimationAction => !!step)];
+      if (first && (steps = steps.slice(-1))[0]) { // placed at load: already there, each at its own point of the loop
+        steps[0].weight = 1; steps[0].time = phase % steps[0].getClip().duration;
+      }
+      activity = next; begin();
+    },
+    update(speed: number, dt: number) {
+    if (steps[0]?.loop === T.LoopOnce && steps[0].time > steps[0].getClip().duration - FADE) { steps.shift(); begin(); }
+    let share = 0; // activity weights fade over FADE; walking and idling fill the rest
+    for (const step of life) share += step.weight = T.MathUtils.clamp(step.weight + (step === steps[0] ? dt : -dt) / FADE, 0, 1);
+    const stand = 1 - Math.min(share, 1);
     const moving = Math.min(speed / 0.6, 1), running = T.MathUtils.clamp((speed - WALK) / (RUN - WALK), 0, 1);
-    idle.weight = 1 - moving;
-    walk.weight = moving * (1 - running);
-    run.weight = moving * running;
+    idle.weight = (1 - moving) * stand;
+    walk.weight = moving * (1 - running) * stand;
+    run.weight = moving * running * stand;
     walk.timeScale = T.MathUtils.clamp(speed / 1.4, 0.6, 1.5) / bodyScale;
     run.timeScale = T.MathUtils.clamp(speed / 3.8, 0.8, 1.2) / bodyScale;
     mixer.update(dt);
@@ -151,9 +225,12 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
     const smile = T.MathUtils.smoothstep(time, smileAt, smileAt + 0.4) * (1 - T.MathUtils.smoothstep(time, smileAt + 2.2, smileAt + 2.6));
     face?.setValue('happy', 0.65 * smile);
     face?.setValue('blink', Math.max(0, 1 - Math.abs(time - blinkAt - 0.08) / 0.08) * (1 - smile));
-    if (sd) {
+    mouth = T.MathUtils.clamp(mouth + (activity === 'talk' ? dt : -dt) / 0.4, 0, 1);
+    face?.setValue('aa', mouth * 0.5 * Math.max(0, Math.sin(time * 9) * Math.sin(time * 2.3 + phase))); // chatting lips
+    if (sd) { // feet stay on the ground while standing; a seated body keeps its rest height on the seat instead
       vrm.humanoid.update(); group.updateMatrixWorld(true);
-      vrm.scene.position.y += group.getWorldPosition(v).y - Math.min(...contacts.map(({ bone, point }) => bone.localToWorld(v.copy(point)).y));
+      const ground = vrm.scene.position.y + group.getWorldPosition(v).y - Math.min(...contacts.map(({ bone, point }) => bone.localToWorld(v.copy(point)).y));
+      vrm.scene.position.y = T.MathUtils.lerp(restY, ground, stand);
     }
     if (first) { vrm.humanoid.update(); group.updateMatrixWorld(true); vrm.springBoneManager?.reset(); }
     first = false;

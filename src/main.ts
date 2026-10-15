@@ -27,6 +27,8 @@ import { localStorageAdapter } from './game/storage';
 import { npcs } from './data/npcs';
 import { doors } from './data/doors';
 import { generate } from './sim/npcgen';
+import { whereIs } from './sim/npc';
+import { lifeSpots, sidewalk } from './scene/spots';
 
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk|night) or style=current (the look A/B corner as before).
@@ -120,14 +122,18 @@ if (talkPlace) {
   if (npc) await talk.start(npc, true);
 }
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
-// ?cast=1: the zebra crossing by the corner is the only open ground (sidewalks are 1.3 m deep). A half ring behind
-// the player as seen from the start camera, everyone turned to the camera, so no bollard, planter or back covers a face.
-const stage = new T.Vector3(-6.3, 0, -2.2), yaw = controls.state.yaw;
+// ?cast=1: the player waits on the zebra crossing; the six residents take the street's life spots (C083) by where
+// their schedule puts them at this light's hour (day 14:00, dusk 18:00, night 21:00); off-street residents stop to chat.
+const stage = new T.Vector3(-6.3, 0, -2.2), yaw = controls.state.yaw, hour = { day: 14, dusk: 18, night: 21 }[time];
 if (cast.length) { character.group.position.copy(stage); character.group.rotation.y = yaw; }
+const free = [...lifeSpots];
 cast.forEach((person, i) => {
-  const angle = Math.PI * (0.2 + 0.6 * i / (cast.length - 1)), back = -2 * Math.sin(angle), side = 2 * Math.cos(angle);
-  person.group.position.set(stage.x + back * Math.sin(yaw) + side * Math.cos(yaw), 0, stage.z + back * Math.cos(yaw) - side * Math.sin(yaw));
-  person.group.rotation.y = Math.atan2(stage.x + 3 * Math.sin(yaw) - person.group.position.x, stage.z + 3 * Math.cos(yaw) - person.group.position.z);
+  const place = whereIs(npcs[i % npcs.length], { day: 1, hour, minute: 0 });
+  const spot = free.find(s => s.places.includes(place)) ?? free.find(s => s.kind === 'talk') ?? free[0];
+  free.splice(free.indexOf(spot), 1);
+  person.group.position.set(spot.x, sidewalk, spot.z);
+  person.group.rotation.y = spot.yaw;
+  person.act(spot.kind, spot.seat);
   scene.add(person.group);
 });
 if (blob) cast.forEach(person => {
@@ -261,7 +267,7 @@ renderer.setAnimationLoop(now => {
 });
 // Read-only diagnostics for browser verification and tests/play.
 Object.assign(window, { cornerDiagnostics: () => ({ look, toon, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
-  sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name),
+  sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name), life: cast.map(person => person.activity()),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
   time, spot: held ? query.get('spot') : '', sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
