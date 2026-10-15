@@ -61,7 +61,7 @@ it('C107 2: a new game earns +10 a day in its first week (seeds 0·1·123), with
     expect(r.net / 30).toBeGreaterThanOrEqual(10); expect(r.net / 30).toBeLessThanOrEqual(25);
     expect(week, `seed ${seed}`).toBeGreaterThanOrEqual(8.9); // seed 1 is 9.0 (C096 fee test pins the minimum fee); see the card report
   }
-});
+}, 60000); // three 30-day runs take ~5s alone, more beside other test files
 
 it('C107 3: an accepted haggle reaches every system, so a regular\'s third purchase starts the worry', () => {
   const seen: ShopEvent[] = [], spy = { id: 'spy', create: () => ({}), validate: (raw: unknown) => raw as object,

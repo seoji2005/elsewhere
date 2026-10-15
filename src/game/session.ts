@@ -134,6 +134,7 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
     dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds', messenger: createMessengerState(), tycoon: emptyTycoon() };
 }
+const orderNumber = (o: { id: string }) => Number(o.id.slice(o.id.lastIndexOf(':') + 1));
 // Check required structures before exposing a restored state to simulation ticks.
 function checkShape(value: unknown, template: unknown): void {
   if (Array.isArray(template)) { if (!Array.isArray(value)) throw Error('Invalid array'); return; }
@@ -253,6 +254,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
         const history = state.world.ledger.history;
         if (history !== undefined) {
           checkShape(history, { ids: [], days: {} });
+          if (history.through !== undefined && (!Number.isSafeInteger(history.through) || history.through < 0)) throw Error('Invalid retired day');
           if (!history.ids.every(id => typeof id === 'string' && id.length > 0) ||
               new Set(history.ids).size !== history.ids.length) throw Error('Invalid retired IDs');
           if (history.retired !== undefined) {
@@ -290,9 +292,9 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
               state.world.ledger.balances[`${l.id}:deposit`] !== (l.ended ? 0 : unit.deposit) ||
               !Number.isSafeInteger(l.arrears) || l.arrears < 0 || l.reports.length > 7 ||
               !l.rentDue.every(d => Number.isSafeInteger(d) && d >= l.rentedDay && d <= state.settledDay)) throw Error('Invalid lease');
-          for (const [i, o] of l.orders.entries()) {
+          for (const [i, o] of l.orders.entries()) { // C108: old deliveries are pruned, so numbers only increase
             checkShape(o, { id: '', itemId: '', quantity: 0, arrival: 0, delivered: false });
-            if (o.id !== `${l.id}:order:${i}` || !b?.store.stock.some(s => s.itemId === o.itemId) ||
+            if (o.id !== `${l.id}:order:${orderNumber(o)}` || orderNumber(o) < 0 || i > 0 && orderNumber(o) <= orderNumber(l.orders[i - 1]) || !b?.store.stock.some(s => s.itemId === o.itemId) ||
                 !Number.isSafeInteger(o.quantity) || o.quantity < 1 || !Number.isSafeInteger(o.arrival) || o.arrival < 1440)
               throw Error('Invalid stock order');
           }
@@ -398,7 +400,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const stock = b.store.stock.find(s => s.itemId === itemId);
       if (!Number.isSafeInteger((stock?.backroom ?? 0) + (stock?.displayed ?? 0) + quantity +
           lease.orders.filter(o => !o.delivered && o.itemId === itemId).reduce((n, o) => n + o.quantity, 0))) throw Error('Stock overflow');
-      const id = `${lease.id}:order:${lease.orders.length}`, fee = shops.deliveryCost(itemId, quantity);
+      const id = `${lease.id}:order:${lease.orders.length ? orderNumber(lease.orders.at(-1)!) + 1 : 0}`, fee = shops.deliveryCost(itemId, quantity);
       const result = procure(state.book, state.world.people, state.world.ledger, b.id, producer, itemId,
         quantity, Math.max(1, Math.floor(item.price / 4)), id, now);
       if (result.ok && !result.duplicate) {
@@ -876,6 +878,11 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
         const beforeDay = now.day - 14;
         compactLedger(world.ledger, beforeDay);
         state.work.shifts = state.work.shifts.filter(s => !s.paid || s.endsAt >= cutoff);
+        // C108: deliveries over a week old go, but the latest delivery stays ('first delivery came' gates trading).
+        for (const lease of state.leases) {
+          const last = lease.orders.filter(o => o.delivered).at(-1);
+          lease.orders = lease.orders.filter(o => !o.delivered || o === last || o.arrival >= minute - 7 * 1440);
+        }
         for (const [id, store] of [['player-store', state.store], ...book.businesses.map(b => [b.id, b.store] as const)] as const) {
           store.visits = store.visits.filter(v => v.status === 'waiting' || v.joinedMinute >= cutoff);
           const history = state.revenueHistory[id] ??= {};
