@@ -65,6 +65,19 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
   background: rgba(255, 255, 255, 0.1); }
 .hud-msg.me { margin: 6px 0 6px auto; border-radius: 14px 14px 4px 14px; background: rgba(255, 193, 120, 0.3); }
 .hud-wait:empty { display: none; }
+/* C095 customers' bubbles and haggle answer: top-left column, clear of the status bar, toast, panel and joystick. */
+.patrons {
+  position: fixed; left: calc(env(safe-area-inset-left) + 12px); top: calc(env(safe-area-inset-top) + 10px); z-index: 2;
+  display: flex; flex-direction: column; gap: 6px; width: min(260px, 30vw); pointer-events: none; font: 600 14px/1.35 system-ui, sans-serif;
+}
+.bark, .haggle { padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgba(255, 252, 244, 0.95); color: #2b2018; white-space: pre-line; }
+.bark[hidden], .haggle[hidden] { display: none; }
+.haggle { pointer-events: auto; }
+.haggle-btns { display: flex; gap: 6px; margin-top: 6px; }
+.haggle-btns .hud-btn { flex: 1; min-height: 44px; padding: 0 8px; white-space: nowrap; background: #4a3a2c; }
+.haggle-btns .hud-btn:first-child { background: #c8742c; }
+.shop-barks { margin: 4px 0 8px; color: #c9cfdb; font-size: 13px; white-space: pre-line; }
+@media (orientation: portrait) { .patrons { top: calc(env(safe-area-inset-top) + 56px); width: 60vw; } }
 .hud-say { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); white-space: pre-line; }
 @media (orientation: portrait) {
   .hud-top { left: 8px; }

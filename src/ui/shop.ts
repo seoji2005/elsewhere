@@ -8,6 +8,8 @@ import { gameTime } from '../sim/clock';
 import { dailySummary } from '../sim/store';
 import { weatherFor } from '../sim/weather';
 import type { createSession } from '../game/session';
+import type { PatronState } from '../game/tycoon/patrons';
+import { personas } from '../data/personas';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -91,6 +93,10 @@ export function shopTab(session: Session, ui: ShopUi) {
     ['어제 순이익', () => lease.reports.length ? `${signed(lease.reports.at(-1)!.net)}결` : '–'],
     ['평판', () => signed(state.reputation.player ?? 0)], ['날씨', () => shopStatus(state).name],
   ] as const) live(make('', make('', stats, 'div', label), 'b'), text);
+  title('오늘 손님 한마디');
+  live(make('shop-barks', body), () => ((session.tycoon.state().systems.patrons as PatronState | undefined)?.feed ?? [])
+    .filter(l => Math.floor(l.minute / 1440) === Math.floor(state.world.clock.totalMinutes / 1440)).slice(-5)
+    .map(l => `${hhmm(l.minute % 1440)} ${l.name}(${personas[l.personaId].name}) “${l.text}”`).join('\n') || '아직 손님 말이 없어요.');
   title('재고 · 판매가 · 주문 (내일 입고)');
   for (const s of b.store.stock) {
     const supplier = ui.residents.find(n => n.job === producerJobs[s.itemId]);

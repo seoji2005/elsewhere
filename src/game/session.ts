@@ -5,6 +5,7 @@ import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
+import { personas } from '../data/personas';
 import type { Customer } from '../sim/customer';
 import { chooseWeatherNeed, weatherFor, demandWeight } from '../sim/weather';
 import { advanceClock, gameTime, type GameTime } from '../sim/clock';
@@ -13,7 +14,9 @@ import { compactLedger, isRecorded } from '../sim/ledger';
 import { restoreWorld } from '../sim/save';
 import { roll as tycoonRoll, settle as tycoonSettle, nextId as tycoonNextId } from '../sim/tycoonCore';
 import { tycoonSystems } from './tycoon/registry';
-import type { TycoonCtx, TycoonSystem } from './tycoon/system';
+import type { ShopEvent, TycoonCtx, TycoonSystem } from './tycoon/system';
+import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
+import { applyPersona, decideWithPersona } from '../sim/persona';
 import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
@@ -330,6 +333,10 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   const residents = addResidents(state);
   const ctx = (t = state.tycoon, time?: GameTime) => ctxFor(t, residents, time);
   if (!tycoonReady) { state.tycoon = createTycoon(systems, ctx); state.world.clock.minutesPerSecond = newGameSpeed; } // saves keep their speed
+  // C095 demand hooks, player's shop only (see TycoonSystem.visitBonus / onShopEvent).
+  const visitBonus = (v: { npcId: string; businessId: string; hour: number }) =>
+    Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
+  const shopEvent = (e: ShopEvent) => { for (const sys of systems) sys.onShopEvent?.(ctx(), state.tycoon.systems[sys.id], e); };
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
@@ -715,8 +722,12 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
               if (orders.length && orders.every(o => !o.delivered)) continue;
               if (b.store.events.filter(e => e.reason === 'purchased' && e.time.day === now.day && e.time.hour === now.hour).length >= b.capacity) continue;
             }
-            const customer: Customer = { likes: npc.likes,
+            const pat = b.ownerId === 'player' && systems.includes(patrons) ? state.tycoon.systems.patrons as PatronState : undefined;
+            const persona = pat && personaOf(ctx(), pat, npc.id);
+            let customer: Customer = { likes: npc.likes,
               priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
+            // Personas shift tolerance only above the reference price: list prices never offend (C087 balance kept).
+            if (persona) customer = { ...applyPersona(customer, persona), priceTolerance: Math.max(1, applyPersona(customer, persona).priceTolerance) };
             const preferred = state.relationMode === 'bonds' && state.populationEconomy;
             let need = preferred ? chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
               choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) : undefined;
@@ -726,9 +737,18 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
               need = chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id && s.price <= cash)),
                 choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) ?? need;
             const stock = preferred ? b.store.stock.find(s => s.itemId === need?.itemId) : b.store.stock[0];
-            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= (retail ? retailDemand.visitChance : 45) + 15 * demandWeight(stock.itemId, now.day)) continue;
+            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= (retail ? retailDemand.visitChance : 45) +
+                15 * demandWeight(stock.itemId, now.day) + (b.ownerId === 'player' ? visitBonus({ npcId: npc.id, businessId: b.id, hour: now.hour }) : 0)) continue;
+            const event = { npcId: npc.id, businessId: b.id, itemId: stock.itemId, price: stock.price, count: 1 };
+            if (pat && !park(ctx(), pat, npc.id, persona!)) { shopEvent({ ...event, result: 'parkingFull' }); continue; }
             if (need && stock.price > need.maxPrice) {
+              // A haggler asks the owner in person; with nobody to ask it is a lost 'expensive' sale.
+              if (persona && state.player.placeId === b.placeId && decideWithPersona(need, { itemId: stock.itemId, price: stock.price,
+                  available: stock.displayed + stock.backroom }, cash, persona) === 'haggle') {
+                shopEvent({ ...event, price: need.maxPrice, result: 'haggle' }); continue;
+              }
               visitStore(b.store, world.ledger, visitId, npc.id, need, customer.patienceMinutes, now);
+              if (pat) shopEvent({ ...event, result: b.store.events.at(-1)!.reason });
               continue;
             }
             if (funds(world.ledger, purses[npc.id]).spendable < stock.price ||
@@ -746,11 +766,25 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             restock(b.store, stock.itemId, 5);
             const visit = visitStore(b.store, world.ledger, visitId, npc.id,
               need ?? { itemId: stock.itemId, maxPrice: stock.price }, customer.patienceMinutes, now);
-            const sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
-            if (sale.ok && !sale.duplicate) {
+            let sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], visit.id, now);
+            // A big spender buys the basket while stock, the counter's hour and the day's budget last: one visit and checkout per item.
+            for (let count = 1; sale.ok && !sale.duplicate; count++) {
               const life = state.shop.residents[npc.id] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
               life.inventory[stock.itemId] = (life.inventory[stock.itemId] ?? 0) + 1; useItem(state.shop, npc.id, stock.itemId);
+              const more = `${visitId}:${count}`;
+              if (persona !== 'bigSpender' || count >= personas.bigSpender.basket || stock.displayed + stock.backroom === 0 || b.capacity <=
+                  b.store.events.filter(e => e.reason === 'purchased' && e.time.day === now.day && e.time.hour === now.hour).length ||
+                  funds(world.ledger, purses[npc.id]).spendable < stock.price ||
+                  dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > retailDemand.dailyBudget) {
+                if (pat) shopEvent({ ...event, count, result: 'purchased' });
+                break;
+              }
+              restock(b.store, stock.itemId, 5);
+              visitStore(b.store, world.ledger, more, npc.id, need ?? { itemId: stock.itemId, maxPrice: stock.price }, customer.patienceMinutes, now);
+              sale = checkoutBusiness(book, world.people, world.ledger, b.id, purses[npc.id], more, now);
+              if (!sale.ok) shopEvent({ ...event, count, result: 'purchased' });
             }
+            if (pat && !sale.ok && b.store.events.at(-1)?.visitId === visit.id) shopEvent({ ...event, result: b.store.events.at(-1)!.reason });
           }
         }
         for (const notice of [...state.ripple.notices]) {
