@@ -1,7 +1,9 @@
 // C095b: the shop floor — crowd level, customers' chats about real records, the first sale and regulars' signals.
 import { items } from '../../data/items';
 import { crowdLevels, fill, sceneLines, talks } from '../../data/shopScene';
+import { stillWaiting } from '../../sim/customer';
 import { parkingSpaces, type PatronState } from './patrons';
+import type { StaffState } from './staff';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './system';
 
 export type SceneKind = 'talk' | 'fast' | 'first' | 'again' | 'usual' | 'guess';
@@ -17,7 +19,17 @@ export interface SceneState {
 const minuteOf = (ctx: TycoonCtx) => (ctx.time.day - 1) * 1440 + ctx.time.hour * 60 + ctx.time.minute;
 const itemName = (id: string) => items.find(i => i.id === id)?.name ?? id;
 const nameOf = (ctx: TycoonCtx, id: string) => ctx.residents.find(n => n.id === id)?.name ?? id;
-export const crowdOf = (s: SceneState) => [...crowdLevels].reverse().find(l => s.present.length >= l.min)!;
+/** C116: who stands at the player's counter now — the boss's line (waiting visits, hagglers) and staff checkouts queued or under way. */
+export function lineOf(ctx: TycoonCtx): string[] {
+  const b = ctx.book.businesses.find(b => b.closedAt === null && b.id === ctx.leases.find(l => !l.ended)?.businessId), m = minuteOf(ctx);
+  const pat = ctx.systems.patrons as PatronState | undefined, staff = ctx.systems.staff as StaffState | undefined;
+  if (!b) return [];
+  return [...b.store.visits.filter(v => v.status === 'waiting' && stillWaiting(v.joinedMinute, v.patienceMinutes, m)).map(v => v.actorId),
+    ...(pat?.haggles ?? []).filter(h => h.businessId === b.id).map(h => h.npcId),
+    ...[...staff?.queue ?? [], ...Object.values(staff?.people ?? {}).map(p => p.task?.order)].map(o => o?.npcId ?? '')].filter(Boolean);
+}
+/** n: how many count — this hour's customers by default; the HUD passes the counter line (C116). */
+export const crowdOf = (s: SceneState, n = s.present.length) => [...crowdLevels].reverse().find(l => n >= l.min)!;
 
 function line(ctx: TycoonCtx, s: SceneState, npcId: string, kind: SceneKind, text: string, fact?: string) {
   s.feed.push({ minute: minuteOf(ctx), npcId, name: nameOf(ctx, npcId), kind, text, ...fact ? { fact } : {} });

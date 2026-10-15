@@ -26,7 +26,7 @@ import type { CityState } from '../sim/cityEvents';
 import { cityLines, partnerLot, roadworks } from '../data/cityEvents';
 import { parkingSpaces } from '../game/tycoon/patrons';
 import { workKey, workTab, worryUi } from './work';
-import { crowdOf, guessUsual, type SceneState } from '../game/tycoon/scene';
+import { crowdOf, guessUsual, lineOf, type SceneState } from '../game/tycoon/scene';
 import { crowdLevels, sceneLines } from '../data/shopScene';
 import { personas } from '../data/personas';
 import { ding, isMuted, setMuted } from './sound';
@@ -396,7 +396,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   mute.onclick = () => { setMuted(!isMuted()); render(); };
   let heard = state.world.clock.totalMinutes, asked = '', guessing = '', slowUntil = 0;
   const lines: string[] = [], sceneOf = () => session.tycoon.state().systems.scene as SceneState | undefined;
-  const crowd = () => { const s = sceneOf(); return s ? crowdOf(s) : crowdLevels[0]; };
+  const inLine = () => lineOf(session.tycoon.ctx()).length; // C116: the crowd shown is the counter line
+  const crowd = () => { const s = sceneOf(); return s ? crowdOf(s, inLine()) : crowdLevels[0]; };
   const nextBark = () => bubbles.forEach((el, i) => {
     if (!el.hidden || i >= crowd().bubbles || !lines.length) return;
     el.textContent = lines.shift()!; el.hidden = false;
@@ -420,7 +421,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     heard = Math.max(heard, ...fresh.map(l => l.minute));
     nextBark();
     crowdText.hidden = mute.hidden = !inside;
-    crowdText.textContent = `${crowd().name} · 손님 ${sc?.present.length ?? 0}명`;
+    crowdText.textContent = `${crowd().name} · 손님 ${inLine()}명`;
     mute.textContent = isMuted() ? '🔇' : '🔊';
     const u = inside ? sc?.asks[0] : undefined;
     usualBox.hidden = !u;

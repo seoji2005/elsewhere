@@ -3,7 +3,7 @@ import { createSession, SESSION_KEY } from '../../src/game/session';
 import { gameTime } from '../../src/sim/clock';
 import { transfer } from '../../src/sim/ledger';
 import { patrons, type PatronState } from '../../src/game/tycoon/patrons';
-import { crowdOf, guessUsual, scene, type SceneState } from '../../src/game/tycoon/scene';
+import { crowdOf, guessUsual, lineOf, scene, type SceneState } from '../../src/game/tycoon/scene';
 import type { ShopEvent, TycoonCtx } from '../../src/game/tycoon/system';
 
 // As patrons.test: the owner stays in the cafe with stock delivered on day 2.
@@ -100,4 +100,16 @@ it('C095b: the first sale is recorded once and never replays after a reload; spl
   const s = again.tycoon.state().systems.scene as SceneState;
   expect(s.first).toEqual(first);
   expect(s.feed.filter(l => l.kind === 'first' && l.minute !== first.minute)).toHaveLength(0);
+});
+
+it('C116: the crowd shown counts the counter line — waiting visits, hagglers and staff checkouts — not the hour', () => {
+  const { s, pat, at, ids, ev, b } = floor(), ctx = at(10), shown = () => crowdOf(s, lineOf(ctx).length);
+  for (let i = 0; i < 6; i++) ev(ctx, ids[i]); // six bought and left this hour: nobody in line
+  expect([lineOf(ctx).length, shown().name]).toEqual([0, '한산']);
+  for (let n = 1; n <= 3; n++) b.store.visits.push({ id: `v${n}`, actorId: ids[n], need: { itemId: 'tea', maxPrice: 8 },
+    joinedMinute: 2 * 1440 + 600, patienceMinutes: 30, price: 8, status: 'waiting' });
+  pat.haggles.push({ visitId: 'h', npcId: ids[4], businessId: b.id, itemId: 'tea', offer: 7, minute: 2 * 1440 + 600 });
+  const withStaff = { ...ctx, systems: { ...ctx.systems, staff: { queue: [{ ref: 'q', npcId: ids[5] }], people: {} } } } as TycoonCtx;
+  expect([lineOf(withStaff), crowdOf(s, lineOf(withStaff).length).name]).toEqual([ids.slice(1, 6), '북적']);
+  expect(lineOf(at(11))).toEqual([ids[4]]); // the waiting ones ran out of patience; the haggler is still there
 });

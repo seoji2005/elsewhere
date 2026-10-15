@@ -166,7 +166,7 @@ function counterLine(dt: number) {
   const door = doors.find(d => d.placeId === b?.placeId)?.position, shown = line.open ? line.queue.slice(0, 4) : [];
   if (line.open && !wasOpen && door) { // 계산대 시점: the boss turns to the line, the camera looks along it from the street
     character.group.rotation.y = Math.PI / 2;
-    Object.assign(controls.state, { yaw: -0.3, pitch: 0.42, dist: 6.5 });
+    Object.assign(controls.state, { yaw: -0.5, pitch: 0.62, dist: 6.5 });
   }
   wasOpen = line.open;
   if (anime && shown.length && !queuers.length && !queueLoading) {
@@ -190,7 +190,7 @@ function counterLine(dt: number) {
   }
   for (const q of queuers) if (q.npcId && door) {
     const at = q.person.group.position, slot = shown.findIndex(l => l.npcId === q.npcId);
-    const tx = q.leaving ? door.x - 8 : door.x + 1 + 0.7 * slot, tz = door.z + (q.leaving ? 1.4 : 0.6);
+    const tx = q.leaving ? door.x - 8 : door.x + 0.9 + 0.6 * slot, tz = door.z + (q.leaving ? 1.4 : 0.6 + 0.35 * slot);
     const d = Math.hypot(tx - at.x, tz - at.z), step = Math.min(d, 1.3 * dt), speed = d > 0.05 ? 1.3 : 0;
     if (speed) { at.x += (tx - at.x) / d * step; at.z += (tz - at.z) / d * step; q.person.group.rotation.y = Math.atan2(tx - at.x, tz - at.z); }
     else if (q.leaving) { q.npcId = ''; q.person.group.visible = false; continue; }
