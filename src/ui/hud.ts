@@ -162,6 +162,10 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   enter.onclick = () => act(() => {
     if (!nearDoor) return;
     go(nearDoor.placeId);
+    // C115: the own shop's door puts the boss at the counter in front of it (camera only), not the residents list.
+    if (state.book.businesses.some(b => b.ownerId === 'player' && b.closedAt === null && b.placeId === nearDoor!.placeId)) {
+      session.atCounter(true); show(''); return '계산대에 섰어요';
+    }
     show('people');
     return `${placeName(nearDoor.placeId)}에 들어왔어요`;
   });
@@ -428,7 +432,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
         guessing = ''; session.tycoon.command('scene', (c, s: SceneState) => guessUsual(c, s, u.npcId, st.itemId));
       });
     }
-    const h = inside ? p!.haggles[0] : undefined;
+    const h = inside && !session.counter().open ? p!.haggles[0] : undefined; // C115: at the counter the line's buttons answer it
     haggleBox.hidden = !h;
     if (!h || asked === h.visitId) return;
     asked = h.visitId; haggleBox.replaceChildren();
@@ -465,6 +469,44 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     if (food) button(btns, '아침 메뉴', answer('breakfast', food.itemId));
     if (!e.responses.some(r => r.kind === 'parking')) button(btns, `주차 제휴 ${partnerLot.perDay * Math.ceil((e.endAt - Math.max(minute, e.startAt)) / 1440)}결`, answer('parking'));
     button(btns, '그대로 영업', answer('none'));
+  }
+  // C115: the counter — bubbles over the customers' heads (screen points from main), a '+n' past the four shown, and in the
+  // thumb corner one big 계산 for the head of the line, or 깎아 주기 / 정가 for a haggler.
+  const desk = make('counter'), deskText = make('counter-text', desk, 'span'), deskBtns = make('counter-btns', desk);
+  const says = [0, 1, 2, 3, 4].map(() => make('head-say'));
+  let deskKey = '';
+  function counter(line: ReturnType<Session['counter']>, heads: { npcId: string; x: number; y: number }[]) {
+    const p = session.tycoon.state().systems.patrons as PatronState | undefined, minute = state.world.clock.totalMinutes, first = line.queue[0];
+    const name = (id: string) => residents.find(n => n.id === id)?.name ?? id, item = (id: string) => items.find(i => i.id === id)?.name ?? id;
+    const heard = (id: string) => [...p?.feed ?? [], ...sceneOf()?.feed ?? []].filter(l => l.npcId === id && minute - l.minute < 40)
+      .sort((a, b) => a.minute - b.minute).at(-1)?.text;
+    let lastX = -1e3, lastY = 0;
+    says.forEach((el, i) => {
+      const h = heads[i], text = h && (heard(h.npcId) ?? (h.npcId === first?.npcId ? first.offer !== undefined ? '조금 깎아 주세요.' : `${item(first.itemId)} 주세요!` : ''));
+      el.hidden = !text;
+      if (!h || !text) return;
+      const y = Math.abs(h.x - lastX) < 150 ? Math.min(h.y, lastY - 40) : h.y; // neighbours stack upward, never overlap
+      el.textContent = text; el.style.transform = `translate(${Math.round(h.x)}px, ${Math.round(y)}px) translate(-50%, -100%)`;
+      lastX = h.x; lastY = y;
+    });
+    if (heads.length && line.queue.length > 4) {
+      const el = says[4], last = heads.at(-1)!;
+      el.hidden = false; el.textContent = `+${line.queue.length - 4}`;
+      el.style.transform = `translate(${Math.round(last.x + 46)}px, ${Math.round(last.y + 30)}px) translate(-50%, -100%)`;
+    }
+    desk.hidden = !line.open || !first;
+    enter.hidden = !nearDoor || !panel.hidden || line.open;
+    deskText.textContent = first ? `${name(first.npcId)} 손님 · 줄 ${line.queue.length}명` : '';
+    const key = desk.hidden ? '' : JSON.stringify([first.ref, first.price]);
+    if (key === deskKey) return;
+    deskKey = key; deskBtns.replaceChildren();
+    if (!first) return;
+    const ring = (label: string, accept: boolean) => {
+      make('hud-btn', deskBtns, 'button', label).onclick = () => act(() => session.ringUp(first.ref, accept)
+        ? `${accept ? first.offer ?? first.price : first.price}결 받았어요` : first.offer !== undefined && !accept ? `${name(first.npcId)} 님이 그냥 갔어요` : '팔지 못했어요');
+    };
+    if (first.offer === undefined) ring(`계산 · ${item(first.itemId)} ${first.price}결`, true);
+    else { ring(`깎아 주기 ${first.offer}결`, true); ring(`정가 ${first.price}결`, false); }
   }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   // C112: an item of the player's shop running out gets one line and a customer's word, once per sell-out.
@@ -528,7 +570,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   }
   render();
   setInterval(render, 1000);
-  return { stick, knob, say, ready: () => document.getElementById('loading')?.remove(),
+  return { stick, knob, say, counter, ready: () => document.getElementById('loading')?.remove(),
     // The clock stops while the player reads the 결폰 or the skip question; main shows 멈춤 for those and dialogue.
     reading: () => !panel.hidden || !ask.hidden || !cityBox.hidden || performance.now() < slowUntil, paused(on: boolean) { pause.hidden = !on; },
     home() { tab = 'shop'; }, // C112 ⑦: a new game's first 결폰 opens on 내 가게

@@ -156,6 +156,52 @@ if (blob) cast.forEach(person => {
   contact.position.copy(person.group.position).setY(person.group.position.y + 0.02);
   scene.add(contact);
 });
+// C115: the line at the player's own counter (entered by the door, nobody on duty): up to four of the existing outfits walk
+// in along the sidewalk, queue beside the boss at the door, the head plays the buy clip, and served or impatient ones walk off.
+type Avatar = Awaited<ReturnType<typeof loadAvatar>>;
+const queuers: { person: Avatar; npcId: string; leaving: boolean }[] = [], head = new T.Vector3();
+let queueLoading = false, wasOpen = false;
+function counterLine(dt: number) {
+  const line = session.counter(), b = session.state.book.businesses.find(b => b.ownerId === 'player' && b.closedAt === null);
+  const door = doors.find(d => d.placeId === b?.placeId)?.position, shown = line.open ? line.queue.slice(0, 4) : [];
+  if (line.open && !wasOpen && door) { // 계산대 시점: the boss turns to the line, the camera looks along it from the street
+    character.group.rotation.y = Math.PI / 2;
+    Object.assign(controls.state, { yaw: -0.3, pitch: 0.42, dist: 6.5 });
+  }
+  wasOpen = line.open;
+  if (anime && shown.length && !queuers.length && !queueLoading) {
+    queueLoading = true;
+    void (async () => {
+      for (let i = 1; i <= 4; i++) { // sequential: the copies share the first copy's morph geometry
+        const person = await loadAvatar(camera, sd, outfits[i % outfits.length], i * 0.37);
+        person.group.visible = false;
+        if (blob) { const contact = blob.clone(); contact.position.set(0, 0.02, 0); person.group.add(contact); }
+        scene.add(person.group); queuers.push({ person, npcId: '', leaving: false });
+      }
+    })();
+  }
+  const heads: { npcId: string; x: number; y: number }[] = [];
+  for (const q of queuers) if (q.npcId && !shown.some(l => l.npcId === q.npcId)) q.leaving = true;
+  for (const l of shown) {
+    const q = queuers.find(q => q.npcId === l.npcId) ?? queuers.find(q => !q.npcId);
+    if (!q || !door || q.npcId) continue;
+    Object.assign(q, { npcId: l.npcId, leaving: false });
+    q.person.group.position.set(door.x + 8, sidewalk, door.z + 0.6); q.person.group.visible = true;
+  }
+  for (const q of queuers) if (q.npcId && door) {
+    const at = q.person.group.position, slot = shown.findIndex(l => l.npcId === q.npcId);
+    const tx = q.leaving ? door.x - 8 : door.x + 1 + 0.7 * slot, tz = door.z + (q.leaving ? 1.4 : 0.6);
+    const d = Math.hypot(tx - at.x, tz - at.z), step = Math.min(d, 1.3 * dt), speed = d > 0.05 ? 1.3 : 0;
+    if (speed) { at.x += (tx - at.x) / d * step; at.z += (tz - at.z) / d * step; q.person.group.rotation.y = Math.atan2(tx - at.x, tz - at.z); }
+    else if (q.leaving) { q.npcId = ''; q.person.group.visible = false; continue; }
+    else q.person.group.rotation.y = -Math.PI / 2; // facing the boss at the door
+    q.person.act(!speed && slot === 0 ? 'buy' : 'stand');
+    q.person.update(speed, Math.min(dt, 0.1));
+    head.copy(at).setY(at.y + q.person.focusHeight + 0.45).project(camera);
+    if (head.z < 1) heads.push({ npcId: q.npcId, x: (head.x + 1) / 2 * innerWidth, y: (1 - head.y) / 2 * innerHeight });
+  }
+  ui.counter(line, heads);
+}
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
 // Anime default (STYLE §7): eye-level street walk, 7 m back and 14° down, the upper third sky and rooftops.
 controls.state.dist = Number(query.get('dist')) || (anime ? 7 : controls.state.dist);
@@ -274,6 +320,7 @@ renderer.setAnimationLoop(now => {
   ui.paused(reading);
   if (session.tick(reading ? 0 : Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
   cast.forEach(person => person.update(0, Math.min(dt, 0.1)));
+  counterLine(dt);
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);
   renderer.info.reset();
@@ -284,7 +331,7 @@ renderer.setAnimationLoop(now => {
 });
 // Read-only diagnostics for browser verification and tests/play.
 Object.assign(window, { cornerDiagnostics: () => ({ look, toon, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
-  sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name), life: cast.map(person => person.activity()),
+  sd: anime ? sd : 0, cast: cast.length, line: queuers.filter(q => q.npcId).length, outfits: cast.map(person => person.group.name), life: cast.map(person => person.activity()),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
   time, spot: held ? query.get('spot') : '', sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),

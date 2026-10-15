@@ -184,3 +184,14 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 .toast.act:not(.show) { pointer-events: none; }
 .toast .hud-btn { flex: none; }
 .hud-now.hud-next { position: static; margin: 0 0 8px; }
+/* C115: the counter in the thumb corner (right, above the safe area) and bubbles over the customers' heads. */
+.counter { position: fixed; right: calc(env(safe-area-inset-right) + 12px); bottom: calc(env(safe-area-inset-bottom) + 14px); z-index: 1;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font: 600 13px system-ui, sans-serif; }
+.counter[hidden], .head-say[hidden] { display: none; }
+.counter-text { padding: 2px 10px; border-radius: 10px; background: rgba(43, 32, 24, 0.75); color: #ffc178; }
+.counter-btns { display: flex; gap: 8px; }
+.counter-btns .hud-btn { min-width: 132px; height: 60px; padding: 0 18px; border-radius: 30px; font-size: 18px; background: #c8742c;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); }
+.counter-btns .hud-btn + .hud-btn { background: #4a3a2c; }
+.head-say { position: fixed; left: 0; top: 0; max-width: 170px; padding: 6px 10px; border-radius: 12px 12px 12px 4px; pointer-events: none;
+  background: rgba(255, 252, 244, 0.95); color: #2b2018; font: 600 13px/1.3 system-ui, sans-serif; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
