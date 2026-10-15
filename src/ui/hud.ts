@@ -14,10 +14,11 @@ import { respondToMatch } from '../sim/matchmaking';
 import { restock, visitStore } from '../sim/store';
 import { checkoutBusiness, type Business } from '../sim/business';
 import { trade } from '../sim/market';
+import { asleep, sentToday, waiting, DAILY_LIMIT } from '../sim/messenger';
 import type { createSession } from '../game/session';
 
 type Session = ReturnType<typeof createSession>;
-const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소' } as const;
+const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저' } as const;
 type Tab = keyof typeof tabs;
 const placeName = (id: string) => places.find(p => p.id === id)?.name ?? (id === 'street' ? '거리' : id);
 const two = (n: number) => String(n).padStart(2, '0');
@@ -269,6 +270,33 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     for (const place of places) button(list, place.name, () => { go(place.id); return `${place.name} 도착`; },
       place.id === state.player.placeId);
   }
+  // 메신저: core residents and anyone met, one thread each; replies arrive later through session.tick.
+  const contacts = () => residents.filter(n => !('speech' in n) || readBond(state.bonds, n.id, 'player').met);
+  const inbox = (npcId: string) => state.messenger.messages.filter(m => m.npcId === npcId && m.delivered);
+  function thread(npc: Npc) {
+    const head = make('hud-head', body), minute = () => Math.floor(state.world.clock.totalMinutes);
+    button(head, '‹ 목록', () => { selected = ''; });
+    live(make('hud-name', head), () => `${npc.name} · ${stage(npc)}`);
+    if (!inbox(npc.id).length) note('아직 주고받은 메시지가 없어요.');
+    for (const m of inbox(npc.id)) make(`hud-msg${m.from === 'player' ? ' me' : ''}`, body, 'div', m.text);
+    live(make('hud-note hud-wait', body), () => !waiting(state.messenger, npc.id) ? ''
+      : asleep(npc, minute()) ? `${npc.name} 님은 자고 있어요 · 아침에 답장할 거예요` : `${npc.name} 님이 답장을 쓰는 중…`);
+    const chips = make('hud-chips', body), left = () => DAILY_LIMIT - sentToday(state.messenger, npc.id, minute());
+    for (const [kind, label] of [['hello', '안부'], ['topic', `${npc.likes[0] ?? '요즘'} 이야기`], ['meet', '약속 잡기']] as const)
+      button(chips, label, () => session.sendMessage(uid('msg'), npc.id, kind) ? undefined : '지금은 보낼 수 없어요',
+        () => !!waiting(state.messenger, npc.id) || left() <= 0);
+    live(make('hud-sub', chips, 'span'), () => left() > 0 ? `오늘 ${left()}번 더 보낼 수 있어요` : '오늘 연락은 여기까지예요');
+  }
+  function chat() {
+    const npc = contacts().find(n => n.id === selected);
+    if (npc) return thread(npc);
+    title('메신저 · 떨어져 있어도 연락해요');
+    for (const n of contacts()) {
+      const line = row(`${n.name} · ${stage(n)}`, () => inbox(n.id).at(-1)?.text ?? '아직 대화가 없어요');
+      line.classList.add('tap');
+      line.onclick = () => act(() => { selected = n.id; });
+    }
+  }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
@@ -285,6 +313,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       : tab === 'work'
         ? [state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null)
           .map(b => [b.id, b.store.stock.map(s => s.itemId)]), owned().map(i => i.id)]
+        : tab === 'chat' ? [contacts().map(n => n.id), state.messenger.messages.filter(m => m.delivered).length]
         : [companies.map(c => c.id), Object.keys(state.market.holdings.player ?? {})
           .filter(id => state.market.holdings.player[id] > 0).sort()];
     const key = JSON.stringify([tab, state.player.placeId, selected, membership]);
@@ -298,8 +327,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     updates = [];
     body.replaceChildren();
     Array.from(tabBar.children).forEach((element, index) => element.classList.toggle('on', Object.keys(tabs)[index] === tab));
-    ({ people, work: chores, stock: stocks })[tab]();
-    body.scrollTop = scroll;
+    ({ people, work: chores, stock: stocks, chat })[tab]();
+    body.scrollTop = tab === 'chat' && selected ? body.scrollHeight : scroll;
   }
   render();
   setInterval(render, 1000);
