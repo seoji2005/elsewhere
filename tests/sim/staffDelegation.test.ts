@@ -37,3 +37,9 @@ it('C097 B14: the report comes only from solo, completed records; approved or sh
   const r = closingReport([o('checkout', true, 0), o('haggle', true, 1), o('checkout', true, 2), o('haggle', true, 3), o('stock', true, 4)]);
   expect(r.text).toContain('흥정 손님 2명'); expect(r.evidence.map(e => e.id)).toEqual(['o1', 'o3']);
 });
+
+import { counterShare } from '../../src/sim/staffDelegation';
+it('C110: the counter takes C087\'s hourly cap at the boss\'s hand, more with a 12-hour hand 42, less with a new one', () => {
+  expect(counterShare(2, [BOSS_HAND])).toBe(2); expect(counterShare(1, [])).toBe(0);
+  expect(counterShare(2, [skillAt(42, 12 * 60)])).toBeGreaterThan(2); expect(counterShare(2, [42])).toBeCloseTo(1.7, 5);
+});
