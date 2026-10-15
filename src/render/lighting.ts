@@ -4,6 +4,8 @@ import { DirectionalLight, HemisphereLight, PCFShadowMap,
 
 // Original implementation; distances assume roughly one world unit per metre.
 // static: the shadow map is drawn once and again only after update() or setMapSize() (sun or scene changed).
+// The shadow camera is small (22 m radius in main.ts, 6x the texel density of the old 55 m) and follows the player
+// in follow(), moving in whole texel steps so shadow edges never shimmer while walking.
 export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
   center = new Vector3(), radius = 14, mapSize = 512, mode: 'off' | 'static' | 'dynamic' = 'dynamic',
   toSun = new Vector3(-0.8, Math.tan(11 * Math.PI / 180), 0.6)) {
@@ -23,10 +25,17 @@ export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
   sun.shadow.normalBias = 0.04;
   const offset = toSun.clone().normalize().multiplyScalar(radius * 3);
   function update(target: Vector3) {
-    sun.target.position.copy(target);
-    sun.position.copy(target).add(offset);
+    // Snap to a multiple of four texels (the same grid after a 1024 <-> 512 quality switch).
+    const step = Math.max(0.05, (radius * 2) / sun.shadow.mapSize.x * 4);
+    sun.target.position.set(Math.round(target.x / step) * step, 0, Math.round(target.z / step) * step);
+    sun.position.copy(sun.target.position).add(offset);
     sun.target.updateMatrixWorld();
     renderer.shadowMap.needsUpdate = true;
+  }
+  // Re-centre once the player is 4 m from the last centre; a static map is redrawn only then.
+  function follow(playerPos: Vector3) {
+    const dx = playerPos.x - sun.target.position.x, dz = playerPos.z - sun.target.position.z;
+    if (mode !== 'off' && dx * dx + dz * dz > 16) update(playerPos);
   }
   function setMapSize(size: number) {
     if (sun.shadow.mapSize.x === size) return;
@@ -37,7 +46,7 @@ export function cornerLighting(scene: Scene, renderer: WebGLRenderer,
   }
   scene.add(fill, sun, sun.target);
   update(center);
-  return { sun, fill, update, setMapSize, dispose() {
+  return { sun, fill, update, follow, setMapSize, dispose() {
     scene.remove(fill, sun, sun.target);
     sun.dispose();
     fill.dispose();
