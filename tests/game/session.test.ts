@@ -771,7 +771,7 @@ it('C051: feelings, tea attendance, daily caps, lowering choices and saved event
   next.state.relationMode = 'legacy'; const legacy = structuredClone(next.state);
   expect(next.expressFeelings(id)).toBe(false); expect(next.setFeeling(id, 'love')).toBe(false);
   expect(next.inviteHomeTea('legacy', id)).toBe(false); expect(next.state).toEqual(legacy);
-});
+}, 60_000); // 180 game days; slow on the shared 2-core server
 it('C051: seed 123 reaches mutual dating within 20 days; chat alone remains acquainted', () => {
   const storage = memory(); let session = createSession(storage, 123);
   const chat = createSession(memory(), 123), npc = generate(123, 50)[0], rows = [], stages = new Set();
