@@ -1,6 +1,7 @@
 import { Color, DataTexture, LinearFilter, Material, Mesh, MeshStandardMaterial, MeshToonMaterial, NearestFilter,
   RedFormat, Scene, SRGBColorSpace, Texture } from 'three';
 import { cornerPalette } from '../render/palette';
+import { tone } from '../render/style';
 
 // Look B: darken the first metre above the pavement (contact occlusion) and lift upper floors
 // slightly so façades stand on the ground; lit windows vary by floor and mesh (dark / warm / bright).
@@ -38,11 +39,13 @@ function grounded(material: Material, windows: boolean) {
 // quantized too, lavender shade, a thin warm band on the lit side of the terminator, a few mortar lines,
 // windows as flat two-tone light panels. B "soft illustration": soft ramp (below), luma-based lavender shade,
 // apricot band, top rim light and view-parallax room interiors behind the windows (MASTER_FEEDBACK 2장 ②).
-function toonCity(material: Material, toon: 'a' | 'b', flags: Record<string, boolean>, sunPower: number) {
+function toonCity(material: Material, toon: 'a' | 'b', flags: Record<string, boolean>) {
   material.defines = { ...material.defines, ...(toon === 'a' ? { TOON_A: '' } : { TOON_B: '' }),
     ...Object.fromEntries(Object.entries(flags).filter(([, on]) => on).map(([key]) => [key, ''])) };
   material.onBeforeCompile = shader => {
-    shader.uniforms.sunPower = { value: sunPower };
+    shader.uniforms.sunColor = { value: tone.sun.clone().multiplyScalar(tone.power) }; // unshadowed sun (or moon)
+    shader.uniforms.shadeMul = { value: tone.shade };
+    shader.uniforms.band = { value: tone.band };
     shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
         varying vec3 vWorld; varying float vSeed; varying vec2 vPane; attribute float seed;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -52,7 +55,7 @@ function toonCity(material: Material, toon: 'a' | 'b', flags: Record<string, boo
         #endif
         vWorld = (modelMatrix * wp).xyz; vSeed = seed; vPane = uv;`);
     shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
-        varying vec3 vWorld; varying float vSeed; varying vec2 vPane; uniform float sunPower;
+        varying vec3 vWorld; varying float vSeed; varying vec2 vPane; uniform vec3 sunColor, shadeMul; uniform float band;
         float toonLit = 0., toonBand = 0.;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         #ifdef FLAT_TEX
@@ -87,7 +90,8 @@ function toonCity(material: Material, toon: 'a' | 'b', flags: Record<string, boo
         #endif`)
       .replace('#include <opaque_fragment>', `
         #ifdef TOON_A
-        outgoingLight = mix(outgoingLight * vec3(.78, .82, 1.04), outgoingLight, toonLit) * mix(vec3(1.), vec3(1.14, .98, .84), toonBand);
+        outgoingLight = (reflectedLight.directDiffuse + reflectedLight.indirectDiffuse) * mix(shadeMul, vec3(1.), toonLit)
+          * mix(vec3(1.), vec3(1.14, .98, .84), toonBand * band) + totalEmissiveRadiance;
         #else
         float luma = dot(outgoingLight, vec3(.299, .587, .114));
         float bandMix = smoothstep(.28, .42, luma) * (1. - smoothstep(.42, .58, luma));
@@ -96,20 +100,21 @@ function toonCity(material: Material, toon: 'a' | 'b', flags: Record<string, boo
         outgoingLight += vec3(.95, .88, 1.) * rim * .09 * smoothstep(1.2, 8., vWorld.y);
         #endif
         #include <opaque_fragment>`);
-    // A: the sun's direct term becomes a hard step in both the terminator and the (PCF) cast shadow; the shade
-    // side keeps only the sky fill, tinted lavender above. directLight.color carries the shadow factor, so its
-    // strength relative to the unshadowed sun (sunPower) is the shadow.
+    // A (STYLE §4): two steps only. Every face gets the full sun plus the sky fill; the shade side (terminator or the
+    // PCF cast shadow, quantized) is that same colour times the time of day's shade multiplier, as the MToon people.
+    // directLight.color carries the shadow factor, so its strength relative to the unshadowed sun is the shadow.
     if (toon === 'a') shader.fragmentShader = shader.fragmentShader.replace('#include <lights_toon_pars_fragment>', `
         varying vec3 vViewPosition;
         struct ToonMaterial { vec3 diffuseColor; };
         void RE_Direct_Toon(const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal,
           const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight) {
           float d = dot(geometryNormal, directLight.direction);
-          float m = max(directLight.color.r, max(directLight.color.g, directLight.color.b)) / sunPower, open = smoothstep(.4, .6, m);
+          float m = max(directLight.color.r, max(directLight.color.g, directLight.color.b)) / max(sunColor.r, max(sunColor.g, sunColor.b));
+          float open = smoothstep(.4, .6, m);
           float lit = smoothstep(.1, .16, d) * open;
           toonBand = max(toonBand, smoothstep(.16, .22, d) * (1. - smoothstep(.26, .36, d)) * open);
           toonLit = max(toonLit, lit);
-          reflectedLight.directDiffuse += lit * directLight.color / max(m, 1e-3) * BRDF_Lambert(material.diffuseColor);
+          reflectedLight.directDiffuse += sunColor * BRDF_Lambert(material.diffuseColor);
         }
         void RE_IndirectDiffuse_Toon(const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal,
           const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight) {
@@ -148,7 +153,7 @@ const soft = new DataTexture(new Uint8Array([95, 95, 95, 95, 165, 165, 255, 255]
 soft.minFilter = soft.magFilter = LinearFilter;
 soft.needsUpdate = true;
 
-export function applyLook(scene: Scene, look: 'a' | 'b' | 'anime', windowGlow = 1.6, toon: 'a' | 'b' = 'b', sunPower = 3.2) {
+export function applyLook(scene: Scene, look: 'a' | 'b' | 'anime', windowGlow = 1.6, toon: 'a' | 'b' = 'b') {
   const { materials: p } = cornerPalette();
   const variants = new Map<Material, Material>();
   function shade(material: Material) {
@@ -181,7 +186,7 @@ export function applyLook(scene: Scene, look: 'a' | 'b' | 'anime', windowGlow = 
     // MeshToonMaterial.copy reads the same colour, map, AO, emissive and normal fields from the standard material.
     const final = look === 'anime' ? Object.assign(new MeshToonMaterial().copy(result as never), { gradientMap: toon === 'a' ? ramp : soft }) : result;
     if (look === 'anime') final.color.offsetHSL(0, 0.05, name ? 0 : 0.12).multiplyScalar(1.1); // brighter; unnamed = road slabs
-    if (look === 'anime') toonCity(final, toon, { WINDOWS: windows, BRICK: /brick/.test(name), FLAT_TEX: flat && !!result.map, GROUND: !!name }, sunPower);
+    if (look === 'anime') toonCity(final, toon, { WINDOWS: windows, BRICK: /brick/.test(name), FLAT_TEX: flat && !!result.map, GROUND: !!name });
     else if (look !== 'a' && name) grounded(final, windows);
     variants.set(material, final);
     return final;

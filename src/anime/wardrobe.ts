@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { MToonMaterial } from '@pixiv/three-vrm';
+import { tone } from '../render/style';
 
 // Modern everyday clothes on the CC0 VRoid samples (assets/manifest.json). Every sample's top is a light shirt under a
 // dark vest (or a hoodie with dark trim) in the same UV layout, so one palette per person:
@@ -45,6 +46,19 @@ function recolor(map: T.Texture, colors: readonly string[], soft: number) {
   return texture;
 }
 
+// STYLE §4: MToon gets the city's two-step cel. Its sky fill lights the full colour even on the shade side, so the fill is
+// mixed by the same shading factor as the sun: shade/lit is then the time's multiplier exactly, as on the buildings.
+function cel(material: MToonMaterial) {
+  const defines = material.onBeforeCompile.bind(material);
+  material.onBeforeCompile = (shader, renderer) => {
+    defines(shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('float getShading(', 'float celLit = 0.;\nfloat getShading(')
+      .replaceAll('float shading = getShading( dotNL, shadow, material.shadingShift );', '$&\n    celLit = max(celLit, shading);')
+      .replaceAll('irradiance * BRDF_Lambert( material.diffuseColor )',
+        'irradiance * BRDF_Lambert( mix( material.shadeColor, material.diffuseColor, celLit ) )');
+  };
+}
+
 export function dress(scene: T.Object3D, outfit: Outfit) {
   const slots = (name: string) => /Tops/.test(name) ? [0, 1] : /Bottoms/.test(name) ? [2] : /Accessory/.test(name) ? [3]
     : /Shoes/.test(name) ? [4] : /HAIR|FaceBrow/.test(name) ? [5] : /EyeIris/.test(name) ? [6] : undefined;
@@ -55,13 +69,19 @@ export function dress(scene: T.Object3D, outfit: Outfit) {
       const key = `${original.uuid}:${outfit.name}`, paint = slots(original.name);
       if (materials.has(key)) return materials.get(key)!;
       const material = original.clone();
-      // Toon shade side lifted for everyone (skin included): the samples read too dark under the afternoon sun.
-      material.shadeColorFactor.lerp(new T.Color('#ffffff'), 0.45);
       if (paint && material.map) {
         material.map = recolor(material.map, paint.map(i => outfit.colors[i]), paint[0] === 5 ? 0.8 : 0.35);
-        material.shadeMultiplyTexture = material.map;
-        material.color.set('#ffffff'); material.shadeColorFactor.set('#d6d0de');
+        material.color.set('#ffffff');
       }
+      // Shade = lit colour x the time's multiplier, terminator at N·L ≈ 0.13 like the city, no rim or matcap. Faces and
+      // eyes never shade (no blot under the nose). Lines come from the city's ToonEdges pass: hull outlines are hidden.
+      material.shadeMultiplyTexture = material.map;
+      material.shadeColorFactor.copy(material.color);
+      if (!/Face|Eye/.test(original.name)) material.shadeColorFactor.multiply(tone.shade);
+      Object.assign(material, { shadingToonyFactor: 0.95, shadingShiftFactor: -0.13, shadingShiftTexture: null,
+        matcapTexture: null, rimMultiplyTexture: null, visible: !original.isOutline });
+      material.parametricRimColorFactor.setRGB(0, 0, 0);
+      cel(material);
       materials.set(key, material);
       return material;
     };
