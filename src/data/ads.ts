@@ -11,7 +11,7 @@ export const reachWaste: Record<Reach, number> = { neighborhood: 0, city: 0.5, n
 
 export interface AdChannel {
   id: string; name: string; weeklyCost: number; reach: Reach; fit: Fit;
-  power: number;    // daily visit lift at full fit before reach waste
+  power: number;    // exposure before reach waste; saturates into visit consideration
   leadDays: number; // days before the ad starts running
   variance: number; // 0..1; hit and dud chances are each variance / 2
 }
@@ -29,12 +29,13 @@ export const adChannels: readonly AdChannel[] = [
 ];
 
 export interface AdMessage {
-  id: 'price' | 'quality' | 'emotion' | 'buzz'; name: string; fit: Fit;
+  id: 'price' | 'speed' | 'quality' | 'emotion' | 'buzz'; name: string; fit: Fit;
   buzz: number;     // word-of-mouth weight
   overheat: number; // backlash chance per campaign from overdone hype
 }
 export const adMessages: readonly AdMessage[] = [
   { id: 'price', name: '가격', fit: fit(1, 0.7, 0.9, 0.9, 0.3), buzz: 0.2, overheat: 0 },
+  { id: 'speed', name: '빠름', fit: fit(0.8, 1, 0.4, 0.6, 0.6), buzz: 0.3, overheat: 0 },
   { id: 'quality', name: '품질', fit: fit(0.5, 0.8, 0.7, 0.8, 1), buzz: 0.4, overheat: 0 },
   { id: 'emotion', name: '감성', fit: fit(0.7, 0.6, 0.9, 1, 0.7), buzz: 0.6, overheat: 0 },
   { id: 'buzz', name: '화제성', fit: fit(1, 0.7, 0.3, 0.5, 0.6), buzz: 1, overheat: 0.08 },

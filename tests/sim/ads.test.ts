@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { adChannels, adMessages, segments } from '../../src/data/ads';
-import { adEffectOnVisit, buyCampaign, planCampaign, resolveCampaign, type CampaignInput, type ShopMix } from '../../src/sim/ads';
+import { CAP, adEffectOnVisit, buyCampaign, checkPromise, planCampaign, resolveCampaign, type CampaignInput, type ShopMix } from '../../src/sim/ads';
 import { createLedger } from '../../src/sim/ledger';
 
 function rng(seed: number) {
@@ -28,8 +28,9 @@ describe('ads', () => {
   it('previews cost and a range that brackets the result', () => {
     const plan = planCampaign(input({ channelId: 'tv', modelId: 'celebrity', weeks: 3 }));
     expect(plan.cost).toBe((600 + 350) * 3);
-    expect(plan.minLift).toBeLessThan(0);
+    expect(plan.minLift).toBe(0);
     expect(plan.maxLift).toBeGreaterThan(plan.expectedLift);
+    expect(plan.maxLift).toBeLessThanOrEqual(CAP);
     const r = resolveCampaign(plan, elderShop, [0.9, 0.9, 0.01, 0.999, 0]);
     expect(r.outcome).toBe('hit');
     expect(r.peak.elders).toBeLessThanOrEqual(plan.maxLift);
@@ -51,7 +52,7 @@ describe('ads', () => {
     const scandal = resolveCampaign(planCampaign(input({ modelId: 'celebrity' })), elderShop, [0, 0.9, 0.5, 0.5, 0]);
     expect(scandal).toMatchObject({ outcome: 'backlash', summary: '모델 음주운전 기사로 불매 조짐' });
     expect(scandal.reputation).toBeLessThan(0);
-    expect(adEffectOnVisit([{ startDay: 1, result: scandal }], 'elders', 1 + 1 + 3)).toBeLessThan(1);
+    expect(adEffectOnVisit([{ startDay: 1, result: scandal }], 'elders', 1 + 1 + 3)).toBe(0);
   });
 
   it('matches hit and dud rates to channel variance over 100k samples', () => {
@@ -68,24 +69,40 @@ describe('ads', () => {
     const plan = planCampaign(input({ weeks: 1 })), r = resolveCampaign(plan, elderShop, [0.5, 0.5, 0.5, 0.5, 0]);
     const lead = adChannels.find(c => c.id === 'flyer')!.leadDays, at = (day: number) => adEffectOnVisit([{ startDay: 10, result: r }], 'elders', day);
     expect(r.summary).toBe('전단지가 어르신에게 무난하게 닿았다');
-    expect(at(10)).toBe(1);
-    expect(at(10 + lead)).toBeGreaterThan(1);
+    expect(at(10)).toBe(0);
+    expect(at(10 + lead)).toBeGreaterThan(0);
     const end = 10 + lead + 7;
     expect(at(end - 1)).toBe(at(10 + lead));
     expect(at(end)).toBeLessThan(at(end - 1));
     expect(at(end + 1)).toBeLessThan(at(end));
-    expect(at(end + 60)).toBe(1);
-    expect(adEffectOnVisit(Array(40).fill({ startDay: 10, result: r }), 'elders', 12)).toBe(3);
+    expect(at(end + 60)).toBe(0);
+    const stacked = (n: number) => adEffectOnVisit(Array(n).fill({ startDay: 10, result: r }), 'elders', 12);
+    expect(stacked(2)).toBeLessThan(2 * stacked(1));
+    expect(stacked(40)).toBeGreaterThan(stacked(2));
+    expect(stacked(40)).toBeLessThanOrEqual(CAP);
   });
 
-  it('pays by transfer only, once per id, and fails without funds', () => {
-    const ledger = createLedger({ shop: 100, agency: 0 }), time = { day: 1, hour: 9, minute: 0 };
-    const plan = planCampaign(input({ weeks: 2 }));
-    expect(buyCampaign(ledger, 'shop', 'agency', plan, time, 'ad:1')).toEqual({ ok: true, duplicate: false });
-    expect(buyCampaign(ledger, 'shop', 'agency', plan, time, 'ad:1')).toEqual({ ok: true, duplicate: true });
+  it('pays by transfer only, once per id, fixes luck at purchase, and fails without funds', () => {
+    const ledger = createLedger({ shop: 100, agency: 0 }), time = { day: 4, hour: 9, minute: 0 };
+    const plan = planCampaign(input({ weeks: 2 })), luck = [0.5, 0.5, 0.01, 0.7, 0];
+    const bought = buyCampaign(ledger, 'shop', 'agency', plan, time, 'ad:1', elderShop, luck);
+    expect(bought).toEqual({ ok: true, duplicate: false, campaign: { startDay: 4, result: resolveCampaign(plan, elderShop, luck) } });
+    expect(bought.campaign?.result.outcome).toBe('hit');
+    expect(buyCampaign(ledger, 'shop', 'agency', plan, time, 'ad:1', elderShop, [0.5, 0.5, 0.9, 0.1, 0]))
+      .toEqual({ ok: true, duplicate: true });
     expect(ledger.balances).toEqual({ shop: 60, agency: 40 });
-    expect(buyCampaign(ledger, 'shop', 'agency', planCampaign(input({ channelId: 'tv' })), time, 'ad:2'))
+    expect(buyCampaign(ledger, 'shop', 'agency', planCampaign(input({ channelId: 'tv' })), time, 'ad:2', elderShop, luck))
       .toEqual({ ok: false, error: 'Insufficient funds' });
     expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(100);
+  });
+
+  it('turns broken ad promises into reputation loss', () => {
+    const fine = { avgWait: 5, soldOutRate: 0.05, priceLevel: 1 };
+    for (const id of ['price', 'speed', 'quality', 'emotion', 'buzz'] as const) expect(checkPromise(id, fine).broken).toBe(false);
+    expect(checkPromise('price', { ...fine, priceLevel: 1.3 })).toMatchObject({ broken: true, summary: '싸다더니 비싸다는 말이 돈다' });
+    expect(checkPromise('speed', { ...fine, avgWait: 40 }).reputation).toBe(-6);
+    expect(checkPromise('quality', { ...fine, soldOutRate: 0.25 }).reputation).toBeGreaterThan(-6);
+    expect(checkPromise('quality', { ...fine, soldOutRate: 0.25 }).reputation).toBeLessThan(0);
+    expect(checkPromise('emotion', { avgWait: 99, soldOutRate: 1, priceLevel: 9 }).broken).toBe(false);
   });
 });
