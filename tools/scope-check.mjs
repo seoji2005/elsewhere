@@ -9,7 +9,7 @@ const section = card.match(/^고칠 파일:\s*\n([\s\S]*?)(?=^크기:)/m);
 const size = card.match(/^크기:\s*(작음|보통|큼)/m)?.[1];
 if (!section || !size) throw Error('Card needs file list and size');
 const patterns = section[1].split('\n').filter(line => line.startsWith('- '))
-  .flatMap(line => line.slice(2).replace(/\([^)]*\)/g, '').split(','))
+  .flatMap(line => line.slice(2).split(' — ')[0].replace(/\([^)]*\)/g, '').split(','))
   .map(value => value.trim().replace(/`/g, ''));
 const allowed = patterns.map(pattern => new RegExp(`^${pattern.split('*')
   .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`));

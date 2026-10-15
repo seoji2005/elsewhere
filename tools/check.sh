@@ -13,7 +13,7 @@ while (( $# )); do
 done
 npx --no-install tsc --noEmit
 if [[ -d tests ]] && [[ -n $(find tests -type f \( -name '*.test.*' -o -name '*.spec.*' \) -print -quit) ]]; then
-  npx --no-install vitest run --configLoader runner  # runner: no temp files in the (shared, read-only for Codex) node_modules
+  npx --no-install vitest run --configLoader runner $([ -x /usr/local/bin/blender ] || echo --exclude tests/tools/normalize.test.ts)  # runner: no temp files in the (shared, read-only for Codex) node_modules
 fi
 npm run build
 node --input-type=module <<'JS'
