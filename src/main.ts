@@ -29,7 +29,7 @@ import { generate } from './sim/npcgen';
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
 const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
-const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 2; // user 2026-10-15: 2.7 heads
+const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 0; // user 2026-10-15: 6.5–7 heads
 const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
 // Anime city plans (C033): toon=a hard cel with screen-space outlines (default), toon=b soft illustration.
 const toon = query.get('toon') === 'b' ? 'b' : 'a';
