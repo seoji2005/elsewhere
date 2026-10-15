@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest';
 import { createSession } from '../../src/game/session';
-import { cases, scopes } from '../../src/data/aiContracts';
+import { cases, closing, developers, failLine, nextLines, scopes } from '../../src/data/aiContracts';
 import { classify, devInput, preview } from '../../src/sim/aiAutomation';
 import { answer, askQuestion, inquire, type OpportunityState } from '../../src/game/tycoon/opportunity';
-import { askReuse, begin, followUp, inspect, legs, pickDev, pickScope, results, retryPayment, rework, sign, start, type AiState } from '../../src/game/tycoon/aiContracts';
+import { askReuse, back, begin, confirmMid, followUp, free, inspect, legs, pickDev, pickScope, renegotiate, results, retryPayment, rework, sign, start,
+  type AiState } from '../../src/game/tycoon/aiContracts';
 import { compactLedger } from '../../src/sim/ledger';
 
 function setup(data = new Map<string, string>()) {
@@ -197,4 +198,59 @@ it('C104 A8: delivery records real runs; a follow-up needs those records and is 
   expect(a.run((cx, s) => followUp(cx, s, a.id)).id).toBe(next.id);
   const restored = setup(a.data);
   expect(restored.ai()).toEqual(a.ai());
+});
+
+it('C104 review 1: an unfunded contract can be cancelled or switched to success-only; the developer is released', () => {
+  const f = setup(), c = f.deal('novice', 'list', 'advance');
+  f.bal[c.clientId] = 0; f.run((cx, s) => begin(cx, s, c.id));
+  expect(f.ai().contracts[0].stage).toBe('awaitingFunding');
+  f.run((cx, s) => renegotiate(cx, s, c.id, 'successOnly'));
+  expect(f.ai().contracts[0]).toMatchObject({ pay: 'successOnly', stage: 'scoping' });
+  expect(f.run((cx, s) => begin(cx, s, c.id))).toBe(true);
+  const g = setup(), d = g.deal('senior', 'normal', 'advance');
+  g.bal[d.clientId] = 0; g.run((cx, s) => begin(cx, s, d.id));
+  expect(() => g.run((cx, s) => renegotiate(cx, s, d.id, 'successOnly'))).toThrow();
+  g.run((cx, s) => renegotiate(cx, s, d.id, 'cancel'));
+  expect(g.ai().contracts[0].stage).toBe('cancelled');
+  const other = g.contract();
+  expect(() => g.run((cx, s) => pickDev(cx, s, other.id, 'senior'))).not.toThrow();
+});
+
+it('C104 review 2: developers work only in their own free minutes (home, not on shift), every booked minute', () => {
+  const f = setup(), ctx = f.session.tycoon.ctx();
+  for (const d of ['novice', 'senior'] as const) {
+    const [from, to] = developers[d].hours;
+    for (let day = 0; day < 7; day++) for (let m = from * 60; m < to * 60; m += 15) expect(free(ctx, f.ai().devs[d], day * 1440 + m)).toBe(true);
+  }
+  const busyId = ctx.residents.find(n => !free(ctx, n.id, 13 * 60) && n.schedule.every(s => s[1]?.fromMinute <= 13 * 60))!;
+  expect(busyId).toBeDefined(); // 출근 중인 주민은 가용 시간이 아니다
+});
+
+it('C104 review 3: data consent is stored per version; changing developer or scope voids it; signing records both at that version', () => {
+  const f = setup(), c = f.contract();
+  f.run((cx, s) => pickDev(cx, s, c.id, 'senior')); f.run((cx, s) => pickScope(cx, s, c.id, 'normal'));
+  const yes = f.run((cx, s) => askReuse(cx, s, c.id)), v = f.ai().contracts[0].version;
+  expect(f.ai().contracts[0].consent).toEqual({ client: yes ? v : null, dev: v });
+  f.run((cx, s) => pickScope(cx, s, c.id, 'extended'));
+  expect(f.ai().contracts[0]).toMatchObject({ version: v + 1, reuse: null, consent: { client: null, dev: null } });
+  expect(f.run((cx, s) => askReuse(cx, s, c.id))).toBe(yes); // 다시 물어도 같은 답
+  f.run((cx, s) => sign(cx, s, c.id, 'advance'));
+  expect(f.ai().contracts[0].consent).toEqual({ client: v + 2, dev: v + 2 });
+});
+
+it('C104 review 4·5: back undoes scope then developer before signing; the 50% question stays answerable after the build', () => {
+  const f = setup(), c = f.contract();
+  f.run((cx, s) => pickDev(cx, s, c.id, 'novice')); f.run((cx, s) => pickScope(cx, s, c.id, 'list'));
+  f.run((cx, s) => back(cx, s, c.id)); expect(f.ai().contracts[0]).toMatchObject({ dev: 'novice', scope: null });
+  f.run((cx, s) => back(cx, s, c.id)); expect(f.ai().contracts[0]).toMatchObject({ dev: null, scope: null });
+  f.run((cx, s) => pickDev(cx, s, c.id, 'novice')); f.run((cx, s) => pickScope(cx, s, c.id, 'list')); f.run((cx, s) => sign(cx, s, c.id, 'successOnly'));
+  expect(() => f.run((cx, s) => back(cx, s, c.id))).toThrow();
+  f.run((cx, s) => begin(cx, s, c.id)); f.advance(1440);
+  expect(f.ai().contracts[0]).toMatchObject({ stage: 'testing', asked: 1 });
+  f.run((cx, s) => confirmMid(cx, s, c.id)); expect(f.ai().contracts[0].asked).toBe(2);
+});
+
+it('C104 review 6: every scripted line is one sentence', () => {
+  for (const line of [...Object.values(developers).map(d => d.line), ...Object.values(closing), ...Object.values(nextLines), failLine])
+    expect(line.match(/[.?!](\s|$)/g)?.length ?? 0).toBeLessThanOrEqual(1);
 });

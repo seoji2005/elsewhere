@@ -3,7 +3,7 @@ import type { createSession } from '../game/session';
 import type { Npc } from '../data/npcs';
 import { cases, closing, developers, failLine, fixLines, nextLines, scopes, advanceRate, type DevId, type ScopeId } from '../data/aiContracts';
 import { classify, preview } from '../sim/aiAutomation';
-import { askReuse, begin, busy, canSuccessOnly, confirmMid, fee, followUp, inspect, pickDev, pickScope, refund, results, retryPayment, rework, sign, start,
+import { askReuse, back, begin, busy, canSuccessOnly, confirmMid, fee, followUp, inspect, pickDev, pickScope, refund, renegotiate, results, retryPayment, rework, sign, start,
   type AiState } from '../game/tycoon/aiContracts';
 import { answer, askQuestion, askWorry, defOf, inquire, recordCount, review, shown, type OpportunityState } from '../game/tycoon/opportunity';
 
@@ -57,7 +57,7 @@ export function workTab(session: Session, h: { body: HTMLElement; residents: rea
     line.classList.add('tap');
     line.onclick = () => h.act(() => { run(session, (c, st) => review(c, st, x.id)); h.select(x.id); });
   }
-  const label = { building: '개발 중', testing: '시험물 나옴', reworking: '고치는 중', awaitingPayment: '잔금 기다림', delivered: '납품 완료', failed: '종료' };
+  const label = { building: '개발 중', testing: '시험물 나옴', reworking: '고치는 중', awaitingPayment: '잔금 기다림', delivered: '납품 완료', failed: '종료', cancelled: '취소됨' };
   for (const x of [...s.opps.filter(x => x.status === 'accepted').slice(-2), ...(ai(session)?.contracts.filter(c => c.oppId.endsWith('>next')).slice(-1) ?? [])]) {
     const c = ai(session)?.contracts.find(c => c.oppId === x.id || c === x), npc = 'npcId' in x ? x.npcId : x.clientId;
     const line = h.row(`${who(npc)?.name ?? npc} · ${'npcId' in x ? defOf(x).title : '다음 일감'}`,
@@ -122,15 +122,19 @@ function aiView(session: Session, h: Hud, selected: string) {
     h.note(`근무 ${x.hours[0]}~${x.hours[1]}시 · 맡는 범위 ${Object.keys(x.work).map(k => scopes[k as ScopeId].name).join('·')}`);
     now = '함께할 개발자 고르기';
   } else if (!c.scope) {
-    person(s.devs[c.dev!], dev.label, '어디까지 자동으로 맡길까요? 주소 없는 주문은 늘 사장님 확인이에요.');
-    const ids = Object.keys(dev.work) as ScopeId[];
-    for (const k of ids) { const p = preview(k); h.button(chips, `${scopes[k].name} · 자동 ${p.auto}건 / 사람 확인 ${p.check}건`, () => { run((cx, st) => pickScope(cx, st, id, k)); }); }
+    // 범위 후보는 하나씩 비교(버튼 3개 이하): 이걸로 / 다른 범위 보기, 되돌리기는 머리줄에.
+    const ids = Object.keys(dev.work) as ScopeId[], k = ids.includes(peek as ScopeId) ? peek as ScopeId : ids[0], p = preview(k);
+    person(s.devs[c.dev!], dev.label, `${scopes[k].name}${k === 'list' ? '' : '까지'}면 자동 ${p.auto}건, 사람 확인 ${p.check}건이고 주소 없는 주문은 늘 사장님 확인이에요.`);
+    h.button(chips, `이걸로 할게요 · ${scopes[k].price}결`, () => { run((cx, st) => pickScope(cx, st, id, k)); });
+    h.button(chips, '다른 범위 보기', () => h.select(`ai|${id}|${ids[(ids.indexOf(k) + 1) % ids.length]}`));
+    h.button(head, '이전 선택으로', () => { run((cx, st) => back(cx, st, id)); });
     const box = h.make('hud-note', h.body, 'details');
     h.make('', box, 'summary', `대표 ${cases.length}건 미리보기 (${ids.map(k => scopes[k].name).join(' / ')})`);
     for (const x of cases) h.make('', box, 'div', `${x.text} → ${ids.map(k => classify(k, x) === 'auto' ? '자동' : '확인').join(' / ')}`);
     now = '처리 범위 고르기';
   } else if (!c.signed) {
-    person(c.clientId, '고객', `${scopes[c.scope].name} ${price}결로 해요. 선금 ${Math.round(price * advanceRate)}결은 착수 때 드릴게요.`);
+    person(c.clientId, '고객', `${scopes[c.scope].name} ${price}결로 하고 선금 ${Math.round(price * advanceRate)}결은 착수 때 드릴게요.`);
+    h.button(head, '이전 선택으로', () => { run((cx, st) => back(cx, st, id)); });
     h.button(chips, '선금 계약 서명', () => { run((cx, st) => sign(cx, st, id, 'advance')); });
     if (canSuccessOnly(c)) h.button(chips, '성공보수로 (첫 실적 공동 제작)', () => { run((cx, st) => sign(cx, st, id, 'successOnly')); });
     const box = h.make('hud-note', h.body, 'details');
@@ -139,20 +143,22 @@ function aiView(session: Session, h: Hud, selected: string) {
     if (c.reuse === null) h.button(box, '다른 고객 재사용도 물어보기', () => run((cx, st) => askReuse(cx, st, id)) ? '고객: “그 정도는 괜찮아요.”' : '고객: “우리 주문은 우리 일에만 써 주세요.”');
     now = '계약 서명';
   } else if (c.stage === 'scoping' || c.stage === 'awaitingFunding') {
-    person(s.devs[c.dev!], dev.label, c.stage === 'awaitingFunding' ? '선금이 아직 오가지 못했어요. 준비되면 다시 시작해요.'
-      : c.pay === 'successOnly' ? '지급 없이 일정만 잡을게요. 시작할까요?' : `착수하면 선금이 들어오고 제 착수비 ${Math.floor(fee(c) / 2)}결이 나가요.`);
+    person(s.devs[c.dev!], dev.label, c.stage === 'awaitingFunding' ? '선금이 아직 오가지 못해서 준비되면 다시 시작해요.'
+      : c.pay === 'successOnly' ? '지급 없이 일정만 잡고 시작할까요?' : `착수하면 선금이 들어오고 제 착수비 ${Math.floor(fee(c) / 2)}결이 나가요.`);
     h.button(chips, '착수', () => run((cx, st) => begin(cx, st, id)) ? '개발이 시작됐어요' : '선금을 주고받지 못했어요');
+    if (c.stage === 'awaitingFunding' && c.pay === 'advance' && canSuccessOnly(c)) h.button(chips, '성공보수로 바꾸기', () => { run((cx, st) => renegotiate(cx, st, id, 'successOnly')); });
+    if (c.stage === 'awaitingFunding') h.button(chips, '계약 취소', () => { run((cx, st) => renegotiate(cx, st, id, 'cancel')); return '개발자 예약이 풀렸어요'; });
     now = '착수';
-  } else if (c.stage === 'building' && c.asked === 1) {
-    person(s.devs[c.dev!], dev.label, `반쯤 했어요. “${cases.find(x => x.kind === 'missing')!.text}” 이 주문은 사람이 확인하는 게 맞죠?`);
+  } else if (c.asked === 1 && (c.stage === 'building' || c.stage === 'testing')) { // 다 만든 뒤에도 답할 수 있다
+    person(s.devs[c.dev!], dev.label, `${c.stage === 'building' ? '반쯤 했는데' : '다 만들었는데'} ‘${cases.find(x => x.kind === 'missing')!.text}’ 이 주문은 사람이 확인하는 게 맞죠?`);
     h.button(chips, '네, 사람이 확인해요', () => { run((cx, st) => confirmMid(cx, st, id)); });
     now = '중간 확인 답하기';
   } else if (c.stage === 'testing') {
     // 검수: 결과는 '통과 n / 확인 필요 n' 한 줄, 실패 사례는 펼쳐서(입력·기대·실제·사람 확인 여부).
     const all = results(c), fails = all.filter(r => !r.ok), f = fails[0];
-    if (!f) person(c.clientId, '고객', '약속한 대로 나왔네요. 주소 없는 주문도 확인 목록에 남았어요.');
+    if (!f) person(c.clientId, '고객', '주소 없는 주문까지 약속한 대로 확인 목록에 남았네요.');
     else if (c.reworked) person(c.clientId, '고객', failLine);
-    else person(s.devs[c.dev!], dev.label, `‘${f.text}’ → ${f.actual}. 어떻게 고칠까요?`);
+    else person(s.devs[c.dev!], dev.label, `‘${f.text}’ 사례가 ${f.actual}으로 나왔는데 어떻게 고칠까요?`);
     if (!f) h.button(chips, '통과 · 잔금 청구', () => { run((cx, st) => inspect(cx, st, id)); });
     else if (c.reworked) h.button(chips, '여기서 끝내기 · 환급', () => { run((cx, st) => inspect(cx, st, id)); });
     else {
@@ -168,7 +174,7 @@ function aiView(session: Session, h: Hud, selected: string) {
     }
     now = !f ? '검수 통과시키기' : c.reworked ? '계약 끝내기' : '고칠 곳 고르기(재작업 1회 포함)';
   } else if (c.stage === 'awaitingPayment') {
-    person(c.clientId, '고객', '검수는 통과예요. 잔금은 돈이 들어오면 바로 드릴게요.');
+    person(c.clientId, '고객', '검수는 통과라서 잔금은 돈이 들어오면 바로 드릴게요.');
     h.button(chips, '다시 청구하기', () => run((cx, st) => retryPayment(cx, st, id)) ? '잔금이 들어왔어요' : '아직 잔금이 없대요. 내일 다시 받아요');
     h.note(`잔금 ${legsNote(c)} · 받기 전에는 사용권이 열리지 않아요`);
     now = '잔금 기다리기';
@@ -180,8 +186,11 @@ function aiView(session: Session, h: Hud, selected: string) {
       : `환급 ${refund(s, c) - c.owed}결${c.owed ? ` · 남은 채무 ${c.owed}결` : ''} · 개발자 착수비는 한 일 값으로 남아요`);
     if (ok) h.note(r ? `어제 실제 주문 · 자동 ${r.auto}건 / 사람 확인 ${r.check}건(${r.minutes}분)` : '내일부터 실제 주문 처리 기록이 쌓여요');
     now = ok ? (c.next ? '다음 일감 듣기' : '납품 완료') : `종료 · ${c.cause}`;
+  } else if (c.stage === 'cancelled') {
+    person(c.clientId, '고객', '이번엔 없던 일로 하고 다음에 또 얘기해요.');
+    now = '계약 취소됨';
   } else {
-    person(s.devs[c.dev!], dev.label, `${c.stage === 'reworking' ? '고치는 중이에요. ' : ''}${Math.floor((c.work - c.left) * 100 / c.work)}% 했어요. ${dev.hours[0]}~${dev.hours[1]}시에만 작업해요.`);
+    person(s.devs[c.dev!], dev.label, `${c.stage === 'reworking' ? '고치는 중이고 ' : ''}${dev.hours[0]}~${dev.hours[1]}시 쉬는 때에만 작업해서 ${Math.floor((c.work - c.left) * 100 / c.work)}% 했어요.`);
     now = '다음 일까지 넘기며 기다리기';
   }
   h.make('hud-now', h.body, 'div', `지금 할 일 · ${now}`);
