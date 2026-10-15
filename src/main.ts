@@ -3,6 +3,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { buildCorner } from './scene/corner';
+import { buildBlock } from './scene/block';
 import { applyLook } from './scene/looks';
 import { cornerLighting } from './render/lighting';
 import { cornerAtmosphere } from './render/atmosphere';
@@ -55,7 +56,8 @@ if (look === 'b' && !post) { // no post passes: the same Reinhard curve and expo
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera, sd) : loadCharacter()]);
+const block = query.get('block') === '1'; // C067: the building-kit test street instead of the corner
+const [world, character] = await Promise.all([block ? buildBlock(scene) : buildCorner(scene), anime ? loadAvatar(camera, sd) : loadCharacter()]);
 const cast: Awaited<ReturnType<typeof loadAvatar>>[] = [];
 if (anime && query.get('cast') === '1') {
   // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
@@ -82,6 +84,7 @@ const session = createSession(localStorageAdapter());
 const player = session.state.player;
 character.group.position.set(player.x, 0, player.z);
 character.group.rotation.y = player.direction;
+if (block) character.group.position.set(-16, 0, -7); // south sidewalk, between the shops
 let origin = doors.find(d => d.placeId === player.placeId)?.position ?? { x: player.x, z: player.z };
 function syncPosition() {
   const at = character.group.position;
