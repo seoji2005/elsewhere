@@ -18,6 +18,8 @@ import { planCampaign, type CampaignInput } from '../sim/ads';
 import { buyCampaign, running, type AdState } from '../game/tycoon/ads';
 import type { SceneState } from '../game/tycoon/scene';
 import { fill, sceneLines } from '../data/shopScene';
+import { answer as reply97, applicants, baseOf, hireTrial, onDuty, report as closingReport, setPolicy, startTrial, type StaffState } from '../game/tycoon/staff';
+import { policyRows, recommendedPolicy } from '../data/staffPolicies';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -43,7 +45,8 @@ const playerShop = (state: State) => {
 };
 const haulOf = (state: State) => state.tycoon.systems.haul as HaulState;
 const staff = (state: State, businessId: string) => state.book.employment.filter(e => e.businessId === businessId && e.leftAt === null);
-let wage = 5, reply = '', replyTo = '', reading = ''; // storefront whose contract is open
+let wage = 5, reply = '', replyTo = '', reading = '', policy = false, proof = false; // storefront whose contract is open; C097 policy screen, report evidence
+const staffOf = (state: State) => state.tycoon.systems.staff as StaffState;
 const counselOf = (state: State) => state.tycoon.systems.counsel as CounselState | undefined;
 const adsOf = (state: State) => state.tycoon.systems.ads as AdState | undefined;
 // C098 ad picker: one decision per screen (channel → target → message → model → weeks → preview).
@@ -67,7 +70,8 @@ export function shopKey(state: State) {
     b ? staff(state, b.id).map(e => e.actorId) : [], reading,
     counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages,
     adsOf(state)?.campaigns.map(c => [c.id, c.revealed, c.broken]),
-    !!(state.tycoon.systems.scene as SceneState | undefined)?.first];
+    !!(state.tycoon.systems.scene as SceneState | undefined)?.first,
+    staffOf(state) && [staffOf(state).trial?.status, staffOf(state).policy, staffOf(state).requests.filter(r => r.status === 'open').map(r => r.id), policy, proof]];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
 const lines: Record<string, [string, string]> = {
@@ -108,6 +112,16 @@ export function shopTab(session: Session, ui: ShopUi) {
       () => { session.openShop(kind); return `${kindNames[kind]} 개업! 물건을 주문하고 직원을 구해 보세요`; });
     button(row('계약 해지', '보증금 일부를 돌려받아요'), '해지', () => { session.terminateStore(); return '계약을 해지했어요'; });
     return;
+  }
+  const cmd = <T>(fn: (c: ReturnType<Session['tycoon']['ctx']>, s: StaffState) => T) => session.tycoon.command('staff', fn), st = staffOf(state);
+  if (policy) { // C097: five policies on one screen, the recommendation applied in one tap
+    title('직원에게 맡길 정책 · 눌러서 바꾸기');
+    for (const r of policyRows) button(row(r.label, () => r.show(st.policy[r.key] as never)), '바꾸기', () => cmd((_, s) => setPolicy(s,
+      { [r.key]: r.values[(r.values.indexOf(s.policy[r.key]) + 1) % r.values.length] })));
+    note('정책 안의 일은 직원이 혼자 하고, 밖의 일만 물어봐요. 이미 한 발주는 그대로예요.');
+    const chips = make('hud-chips', body);
+    button(chips, '추천값 한 번에 적용', () => cmd((_, s) => setPolicy(s, { ...recommendedPolicy, version: undefined } as never)));
+    return button(chips, '맡기기', () => { cmd((_, s) => setPolicy(s, {})); policy = false; });
   }
   if (ui.hiring) return hireView(b.id);
   if (adStep >= 0) return adView();
@@ -177,6 +191,18 @@ export function shopTab(session: Session, ui: ShopUi) {
       () => { session.fireEmployee(e.actorId); return `${name} 님을 내보냈어요`; });
   }
   button(make('hud-chips', body), '직원 구하기', () => { reply = replyTo = ''; ui.hire(true); }, employees.length >= b.capacity);
+  if (employees.length && st) {
+    const open = st.requests.filter(r => r.status === 'open').slice(0, 3), rep = closingReport(st, day()), npcName = (id: string) => ui.residents.find(n => n.id === id)?.name ?? id;
+    live(note(''), () => `${onDuty(session.tycoon.ctx(), st).length ? '근무 중' : '근무 밖'} · 혼자 완료 ${st.outcomes.filter(o => o.alone && Math.floor(o.end / 1440) === day() - 1).length}건 · 답변 필요 ${st.requests.filter(r => r.status === 'open').length}건`);
+    for (const r of open) {
+      const line = (row(r.kind === 'order' ? `${itemName(r.itemId)} ${r.qty}개 보충에 ${r.amount}결이 필요해요` : `${itemName(r.itemId)}을 ${r.amount}결에 달래요`,
+        r.kind === 'order' ? `${{ limit: '건당 한도', budget: '오늘 예산', funds: '가용액' }[r.ref]}을 넘어요 · ${hhmm(r.until % 1440)}까지` : `할인 권한 밖이에요 · 답이 없으면 안 깎아요`), make('hud-chips', body));
+      button(line, '이번만 승인', () => cmd((c, s) => reply97(c, s, r.id, true)) ? '승인했어요' : '조건이 바뀌어 하지 못했어요');
+      button(line, '정책 수정', () => { policy = true; }); button(line, '거절', () => { cmd((c, s) => reply97(c, s, r.id, false)); });
+    }
+    button(row('마감 보고', rep.text), proof ? '접기' : '근거', () => { proof = !proof; }, !rep.evidence.length);
+    if (proof) for (const o of rep.evidence) note(`${hhmm(o.start % 1440)}–${hhmm(o.end % 1440)} ${npcName(o.npcId)} · ${o.kind === 'haggle' ? '흥정 판매' : o.kind === 'restock' ? '채운 물건 판매' : '계산'}`);
+  }
   title('최근 7일 순이익');
   if (!lease.reports.length) note('첫 결산은 오늘 자정에 나와요.');
   const chart = make('shop-chart', body), max = Math.max(1, ...lease.reports.map(r => Math.abs(r.net)));
@@ -257,6 +283,19 @@ export function shopTab(session: Session, ui: ShopUi) {
     button(chips, '−', () => { wage--; }, () => wage <= 1).setAttribute('aria-label', '시급 내리기');
     live(make('hud-sub', chips, 'span'), () => `제안 시급 ${wage}결 · 09:00–17:00`);
     button(chips, '+', () => { wage++; }).setAttribute('aria-label', '시급 올리기');
+    const t = st?.trial;
+    if (t?.status === 'running' || t?.status === 'done') { // C097: trial result → hire on these terms
+      const name = ui.residents.find(n => n.id === t.npcId)?.name, line = row(`${name} · 시험 근무${t.status === 'running' ? ' 중' : ' 결과'}`, () =>
+        t.checkouts + t.stocked ? `계산 ${t.checkouts}건 · 진열 ${t.stocked}개 · 60분` : '아직 관찰할 업무가 없어요');
+      if (t.status === 'done') button(line, '이 조건으로 채용', () => { if (!cmd(hireTrial)) return '지금은 채용할 수 없어요'; policy = true; ui.hire(false); });
+      return t.status === 'done' && button(line, '다음에', () => { cmd((_, s) => { s.trial!.status = 'ended'; }); });
+    }
+    title('지원자 · 한 시간 유급 시험 근무');
+    for (const a of applicants(session.tycoon.ctx())) {
+      const k = baseOf(session.tycoon.ctx(), a.npc.id), seen = [k.hand < 40 ? '계산 경험 적음' : '손이 빠름', k.eye >= 45 ? '수량 확인 꼼꼼함' : '', k.speech >= 45 ? '말이 부드러움' : '', k.diligence >= 75 ? '성실함' : ''];
+      button(row(`${a.npc.name} · 희망 시급 ${a.wage}결`, `09–17시 가능 · ${seen.filter(Boolean).join(' · ')}`), `시험 근무 (${a.wage}결)`,
+        () => ({ '': `${a.npc.name} 님이 한 시간 일해 봐요 (-${a.wage}결)`, funds: '시험 근무 임금이 모자라요' })[cmd((c, s) => startTrial(c, s, a.npc.id))] ?? '지금은 어려워요');
+    }
     title('아는 주민에게 일자리 제안');
     for (const n of ui.contacts()) {
       const job = state.book.employment.find(e => e.actorId === n.id && e.leftAt === null);

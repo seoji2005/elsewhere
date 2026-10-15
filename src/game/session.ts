@@ -19,6 +19,7 @@ import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
 import { applyPersona, decideWithPersona } from '../sim/persona';
 import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
 import { sign, type CounselState } from './tycoon/counsel';
+import { counterSlots, onDuty, type StaffState } from './tycoon/staff';
 import { emptyTycoon, createTycoon, restoreTycoon, runBeforeMinute, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { cityEvents } from './tycoon/cityEvents';
 import { onSite, type CityState } from '../sim/cityEvents';
@@ -496,7 +497,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const tx = state.world.ledger.transactions.filter(t => t.from === 'player' && t.time.day === day);
       const sum = (predicate: (t: typeof tx[number]) => boolean) => tx.filter(predicate).reduce((n, t) => n + t.amount, 0);
       const cost = sum(t => t.reason.startsWith(`Procurement: ${b?.id}:`)), rent = sum(t => t.reason === `Rent: ${lease.id}`);
-      const wages = sum(t => shifts.some(s => s.id === t.id)), tax = sum(t => t.reason === `Tax: ${b?.id}`);
+      const wages = sum(t => shifts.some(s => s.id === t.id) || t.reason === 'Wage: staff-trial'), tax = sum(t => t.reason === `Tax: ${b?.id}`); // C097: the paid trial day is a wage too
       const ads = sum(t => t.reason.startsWith('Ad: ')), parking = sum(t => t.reason.startsWith('Parking: '));
       const summary = dailySummary(b?.store ?? createStore('player', []), day);
       const report: DayReport = { ...summary, cost, rent, wages, tax, ads, parking,
@@ -759,15 +760,18 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
                 !state.work.shifts.some(s => s.actorId === npc.id && (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
               startEmployeeShift(book, state.work, npc.id, b.placeId, now);
             if (npc.id === b.ownerId) continue;
-            if (b.ownerId === 'player' && (employment || state.player.placeId !== b.placeId && !book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
-                state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute)))) continue;
+            const staffState = b.ownerId === 'player' ? state.tycoon.systems.staff as StaffState | undefined : undefined, away = state.player.placeId !== b.placeId;
+            if (b.ownerId === 'player' && (employment || away && !book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
+                state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute)) && !(staffState?.trial && onDuty(ctx(), staffState).length))) continue;
             const visitId = `${b.id}:${now.day}:${npc.id}${retail && b.ownerId !== 'player' ? `:${Math.floor(now.hour / 8)}` : ''}`;
             if (b.store.visits.some(v => v.id === visitId)) continue;
             if (b.ownerId === 'player') {
               // Opening deliveries precede trading; each counter serves one customer per hourly step.
               const orders = state.leases.find(l => l.businessId === b.id)!.orders;
               if (orders.length && orders.every(o => !o.delivered)) continue;
-              if (b.store.events.filter(e => e.reason === 'purchased' && e.time.day === now.day && e.time.hour === now.hour).length >= b.capacity) continue;
+              // C097: with the boss away the staff's checkout speed caps the hour (never above the counter's capacity).
+              if (b.store.events.filter(e => e.reason === 'purchased' && e.time.day === now.day && e.time.hour === now.hour).length >=
+                  Math.min(b.capacity, away && staffState ? counterSlots(ctx(), staffState) : Infinity)) continue;
             }
             const pat = b.ownerId === 'player' && systems.includes(patrons) ? state.tycoon.systems.patrons as PatronState : undefined;
             const persona = pat && personaOf(ctx(), pat, npc.id);
@@ -791,7 +795,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             if (pat && !park(ctx(), pat, npc.id, pat.personas[npc.id])) { shopEvent({ ...event, result: 'parkingFull' }); continue; }
             if (need && stock.price > need.maxPrice) {
               // A haggler asks the owner in person; with nobody to ask it is a lost 'expensive' sale.
-              if (persona && state.player.placeId === b.placeId && decideWithPersona(need, { itemId: stock.itemId, price: stock.price,
+              if (persona && (!away || staffState && onDuty(ctx(), staffState).length) && decideWithPersona(need, { itemId: stock.itemId, price: stock.price,
                   available: stock.displayed + stock.backroom }, cash, persona) === 'haggle') {
                 shopEvent({ ...event, price: need.maxPrice, result: 'haggle' }); continue;
               }
