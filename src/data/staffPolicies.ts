@@ -16,7 +16,7 @@ export const policyRows: { key: Key; label: string; values: readonly (string | n
   { key: 'reservationPriority', label: '예약 손님', values: ['appointment', 'arrival'],
     show: (v: string) => v === 'arrival' ? '도착 순서' : '약속 시각이 된 예약 먼저' },
 ];
-export const trialMinutes = 60, applicantWages = [12, 15] as const;
+export const trialMinutes = 60, applicantWages = [3, 4] as const;
 
 /** Closing report kinds in R3 B14 priority order. */
 export const reportLines = {
