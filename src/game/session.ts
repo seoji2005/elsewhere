@@ -2,7 +2,8 @@ import { npcs } from '../data/npcs';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
-import { chooseNeed, type Customer } from '../sim/customer';
+import type { Customer } from '../sim/customer';
+import { chooseWeatherNeed, weatherFor, demandWeight } from '../sim/weather';
 import { advanceClock, gameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
 import { compactLedger } from '../sim/ledger';
@@ -104,7 +105,8 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
   world.people = Object.fromEntries(npcs.map(n => [n.id,
     { id: n.id, name: n.name, role: 'npc' as const, placeId: whereIs(n, gameTime(world.clock)) }]));
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
-  return { npcSeed, populationEconomy: false, revenueHistory: {} as Record<string, Record<string, number>>,
+  return { npcSeed, populationEconomy: false, reputation: { player: 0 } as Record<string, number>,
+    revenueHistory: {} as Record<string, Record<string, number>>,
     world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
@@ -194,11 +196,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
         if (parsed.version < 4) Object.assign(state, createEconomy(state.world));
         if (parsed.version < 5) state.populationEconomy = false;
         state.revenueHistory ??= {};
+        state.reputation ??= { player: 0 };
         // Generated identities are omitted from saves; wallets and contracts are retained.
         if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
           !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
         addResidents(state);
         checkShape(state, { ...freshState(), world: createWorld() });
+        if (Object.values(state.reputation).some(n => !Number.isFinite(n) || n < -100 || n > 100))
+          throw Error('Invalid reputation');
         if (parsed.version < 3) state.bonds = seedLegacy(state.world, state.encounters);
         checkSocial(state);
         if (state.economyMinute !== Math.floor(state.world.clock.totalMinutes) ||
@@ -485,13 +490,16 @@ export function createSession(storage: Storage, npcSeed?: number) {
             const customer: Customer = { likes: npc.likes,
               priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
             const preferred = state.relationMode === 'bonds' && state.populationEconomy;
-            const need = preferred ? chooseNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
-              choice(state.npcSeed, `need:${visitId}`) / 0x100000000) : undefined;
+            const need = preferred ? chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
+              choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) : undefined;
             const stock = preferred ? b.store.stock.find(s => s.itemId === need?.itemId) : b.store.stock[0];
-            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= 60 ||
-                b.store.visits.some(v => v.id === visitId) ||
-                funds(world.ledger, purses[npc.id]).spendable < stock.price ||
-                need && stock.price > need.maxPrice ||
+            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= 45 + 15 * demandWeight(stock.itemId, now.day) ||
+                b.store.visits.some(v => v.id === visitId)) continue;
+            if (need && stock.price > need.maxPrice) {
+              visitStore(b.store, world.ledger, visitId, npc.id, need, customer.patienceMinutes, now);
+              continue;
+            }
+            if (funds(world.ledger, purses[npc.id]).spendable < stock.price ||
                 dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
             if (stock.backroom + stock.displayed === 0) {
               const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
@@ -523,6 +531,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
         payWages();
       }
       if (minute % 1440 === 0) {
+        for (const store of [state.store, ...book.businesses.map(b => b.store)]) {
+          const events = store.events.filter(e => e.time.day === now.day - 1);
+          const complaints = events.filter(e => e.reason === 'missing' || e.reason === 'expensive').length;
+          const sales = events.filter(e => e.reason === 'purchased').length;
+          const owner = store.accountId;
+          state.reputation[owner] = Math.max(-100, Math.min(100,
+            (state.reputation[owner] ?? 0) + (complaints ? -2 * complaints : sales ? 1 : 0)));
+        }
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         advanceDay(state.market); state.settledDay = now.day - 1;
         if (state.populationEconomy) supplyDay(state, residents);
