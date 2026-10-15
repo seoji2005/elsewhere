@@ -11,12 +11,17 @@ export const advisorKinds: Record<AdvisorKind, { name: string; weeklyFee: Record
   consultant: { name: '컨설턴트', weeklyFee: { 1: 100, 2: 250, 3: 550 } },
 };
 
-// mistake: 기본 실수율(근속 충성도로 최대 절반까지 감소). saving: 세금 절감률. detect: 숨은 조항 하나를 찾을 확률.
-// embezzle: 주당 횡령 확률(1등급만). 등급 값은 직종 공통.
-export const tiers: Record<Tier, { label: string; mistake: number; saving: number; detect: number; embezzle: number }> = {
-  1: { label: '저가', mistake: 0.12, saving: 0.03, detect: 0.35, embezzle: 0.005 },
-  2: { label: '보통', mistake: 0.05, saving: 0.08, detect: 0.65, embezzle: 0 },
-  3: { label: '고급', mistake: 0.01, saving: 0.12, detect: 0.9, embezzle: 0 },
+// mistake: 기본 실수율(근속 충성도로 최대 절반까지 감소). saving: 세금 절감률. embezzle: 주당 횡령 확률(1등급만, 집행 권한 있을 때).
+// scope: 볼 줄 아는 조항 범주(싼 전문가는 좁다), detect: 범위 안 조항을 찾을 확률, reviewDays: 검토에 걸리는 날. 등급 값은 직종 공통.
+export const tiers: Record<Tier, { label: string; mistake: number; saving: number; embezzle: number;
+  scope: readonly ClauseKind[]; detect: number; reviewDays: number; proposesFix: boolean }> = {
+  1: { label: '저가', mistake: 0.12, saving: 0.03, embezzle: 0.005, scope: ['autoRenew', 'heavyPenalty'],
+    detect: 0.85, reviewDays: 5, proposesFix: false },
+  2: { label: '보통', mistake: 0.05, saving: 0.08, embezzle: 0, detect: 0.92, reviewDays: 3, proposesFix: false,
+    scope: ['autoRenew', 'heavyPenalty', 'exclusiveSupply', 'priceHike', 'hiddenFee', 'noEarlyExit'] },
+  3: { label: '고급', mistake: 0.01, saving: 0.12, embezzle: 0, detect: 0.97, reviewDays: 1, proposesFix: true,
+    scope: ['autoRenew', 'heavyPenalty', 'exclusiveSupply', 'priceHike', 'hiddenFee', 'noEarlyExit',
+      'liabilityShift', 'farCourt', 'nonCompete'] },
 };
 export const tax = {
   rate: 0.2, selfMistake: 0.15, // 회계사 없이 직접 신고할 때의 실수율
@@ -36,16 +41,17 @@ export const contractKinds: Record<ContractKind, { name: string; amount: [number
 // effect: 조항이 게임에 주는 값. 단위는 key 이름을 따른다(Weeks 주, Rate 비율, Share 비율).
 export type ClauseKind = 'autoRenew' | 'heavyPenalty' | 'exclusiveSupply' | 'priceHike' |
   'liabilityShift' | 'noEarlyExit' | 'hiddenFee' | 'farCourt' | 'nonCompete';
-export const clauses: Record<ClauseKind, { text: string; negotiable: boolean; effect: Record<string, number> }> = {
-  autoRenew: { text: '3개월 전 통지 없으면 1년 자동 연장', negotiable: true, effect: { renewWeeks: 52 } },
-  heavyPenalty: { text: '중도 해지 시 남은 기간 대금 전액을 위약금으로 지급', negotiable: true, effect: { penaltyRate: 1 } },
-  exclusiveSupply: { text: '같은 품목은 이 업체에서만 받아야 함', negotiable: true, effect: { exclusive: 1 } },
-  priceHike: { text: '상대가 통지만으로 가격을 올릴 수 있음', negotiable: true, effect: { hikeRate: 0.15 } },
-  liabilityShift: { text: '상대 잘못으로 생긴 손해도 우리 쪽이 책임짐', negotiable: true, effect: { liabilityShare: 1 } },
-  noEarlyExit: { text: '계약 기간 중에는 어떤 이유로도 해지할 수 없음', negotiable: false, effect: { lockWeeks: 26 } },
-  hiddenFee: { text: '관리 수수료가 매주 따로 붙음', negotiable: true, effect: { feeRate: 0.08 } },
-  farCourt: { text: '분쟁이 생기면 상대 지역 법원에서만 다툼', negotiable: false, effect: { disputeCostRate: 0.2 } },
-  nonCompete: { text: '계약 종료 뒤 1년간 같은 업종 영업 금지', negotiable: true, effect: { banWeeks: 52 } },
+// fix: 고급 전문가가 내는 수정안.
+export const clauses: Record<ClauseKind, { text: string; negotiable: boolean; effect: Record<string, number>; fix: string }> = {
+  autoRenew: { text: '3개월 전 통지 없으면 1년 자동 연장', negotiable: true, effect: { renewWeeks: 52 }, fix: '자동 연장 대신 만료 1개월 전 서로 합의로 연장' },
+  heavyPenalty: { text: '중도 해지 시 남은 기간 대금 전액을 위약금으로 지급', negotiable: true, effect: { penaltyRate: 1 }, fix: '위약금은 남은 기간 대금의 10%까지' },
+  exclusiveSupply: { text: '같은 품목은 이 업체에서만 받아야 함', negotiable: true, effect: { exclusive: 1 }, fix: '독점은 빼고 우선 공급으로' },
+  priceHike: { text: '상대가 통지만으로 가격을 올릴 수 있음', negotiable: true, effect: { hikeRate: 0.15 }, fix: '가격 인상은 양쪽 합의로, 연 5% 이내' },
+  liabilityShift: { text: '상대 잘못으로 생긴 손해도 우리 쪽이 책임짐', negotiable: true, effect: { liabilityShare: 1 }, fix: '손해는 잘못한 쪽이 책임' },
+  noEarlyExit: { text: '계약 기간 중에는 어떤 이유로도 해지할 수 없음', negotiable: false, effect: { lockWeeks: 26 }, fix: '3개월 전 통지하면 해지 가능' },
+  hiddenFee: { text: '관리 수수료가 매주 따로 붙음', negotiable: true, effect: { feeRate: 0.08 }, fix: '관리 수수료는 대금에 포함' },
+  farCourt: { text: '분쟁이 생기면 상대 지역 법원에서만 다툼', negotiable: false, effect: { disputeCostRate: 0.2 }, fix: '분쟁은 우리 가게 쪽 법원에서' },
+  nonCompete: { text: '계약 종료 뒤 1년간 같은 업종 영업 금지', negotiable: true, effect: { banWeeks: 52 }, fix: '영업 금지 조항 삭제' },
 };
 
 // 직종 × 등급 × [고용, 정기 보고, 실수, 발견, 없음]. 현대 한국어, 통화 결.
