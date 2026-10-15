@@ -62,7 +62,7 @@ try {
 
   step = '하루를 빨리 넘겨 첫 결산';
   await reload('state.world.clock.minutesPerSecond = 240;');
-  await page.locator('.hud-open:not(.hud-skip)').tap(); // C094: the clock stops while the 결폰 is open; the reload reopens it
+  await page.locator('.hud-open:not(.hud-skip):not(.hud-mute)').tap(); // C094: the clock stops while the 결폰 is open; the reload reopens it
   // Past day 2 02:00 the delivery (24h after ordering) and an hourly autosave are both in the save the reload reads.
   await page.waitForFunction(() => {
     const [, day, hour] = document.querySelector('.hud-status span').textContent.match(/^(\d+)일째 (\d+)/) ?? [];
