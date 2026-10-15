@@ -16,9 +16,10 @@ import { checkoutBusiness, type Business } from '../sim/business';
 import { trade } from '../sim/market';
 import { asleep, sentToday, waiting, DAILY_LIMIT } from '../sim/messenger';
 import type { createSession } from '../game/session';
+import { shopKey, shopStatus, shopTab } from './shop';
 
 type Session = ReturnType<typeof createSession>;
-const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저' } as const;
+const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
 type Tab = keyof typeof tabs;
 const placeName = (id: string) => places.find(p => p.id === id)?.name ?? (id === 'street' ? '거리' : id);
 const two = (n: number) => String(n).padStart(2, '0');
@@ -44,7 +45,9 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const stick = make('stick'), knob = make('knob', stick);
   const enter = make('enter', document.body, 'button'), toast = make('toast');
   const top = make('hud-top'), status = make('hud-status', top);
-  const [timeText, placeText, cashText, energyText] = [0, 1, 2, 3].map(() => make('', status, 'span'));
+  const [timeText, placeText, cashText, energyText, weatherText, warnText] = [0, 1, 2, 3, 4, 5].map(() => make('', status, 'span'));
+  warnText.className = 'hud-warn';
+  weatherText.className = 'hud-weather';
   const phone = make('hud-open', top, 'button', '결폰 열기');
   const panel = make('hud-panel'), tabBar = make('hud-tabs', panel), body = make('hud-body', panel);
   enter.hidden = panel.hidden = true;
@@ -304,6 +307,10 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     placeText.textContent = placeName(state.player.placeId);
     cashText.textContent = `${cash}결`;
     energyText.textContent = `활력 ${Math.round(energy)}`;
+    const shop = shopStatus(state);
+    weatherText.textContent = shop.icon;
+    weatherText.title = shop.name;
+    warnText.textContent = shop.warning;
     pending ||= force;
     if (panel.hidden) return;
     const membership = tab === 'people'
@@ -314,6 +321,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
         ? [state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null)
           .map(b => [b.id, b.store.stock.map(s => s.itemId)]), owned().map(i => i.id)]
         : tab === 'chat' ? [contacts().map(n => n.id), state.messenger.messages.filter(m => m.delivered).length]
+        : tab === 'shop' ? shopKey(state)
         : [companies.map(c => c.id), Object.keys(state.market.holdings.player ?? {})
           .filter(id => state.market.holdings.player[id] > 0).sort()];
     const key = JSON.stringify([tab, state.player.placeId, selected, membership]);
@@ -327,7 +335,9 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     updates = [];
     body.replaceChildren();
     Array.from(tabBar.children).forEach((element, index) => element.classList.toggle('on', Object.keys(tabs)[index] === tab));
-    ({ people, work: chores, stock: stocks, chat })[tab]();
+    body.classList.toggle('shop', tab === 'shop');
+    ({ people, work: chores, stock: stocks, chat, shop: () => shopTab(session, { body, residents, make, button, row, title, note, live,
+      contacts, stage, placeName, hiring: selected === 'hire', hire: on => { selected = on ? 'hire' : ''; } }) })[tab]();
     body.scrollTop = tab === 'chat' && selected ? body.scrollHeight : scroll;
   }
   render();
