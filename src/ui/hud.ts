@@ -30,6 +30,7 @@ import { crowdOf, guessUsual, type SceneState } from '../game/tycoon/scene';
 import { crowdLevels, sceneLines } from '../data/shopScene';
 import { personas } from '../data/personas';
 import { ding, isMuted, setMuted } from './sound';
+import { josa } from './shop';
 
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게', biz: '업무' } as const;
@@ -87,11 +88,14 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   };
   window.addEventListener('pointerup', release, true);
   window.addEventListener('pointercancel', release, true);
-  const say = (text: string) => {
+  // C112 ⑧: a toast may carry one button (e.g. 'go to the producer'); it then stays a little longer and takes taps.
+  const say = (text: string, action?: [string, () => void]) => {
     toast.textContent = text;
+    if (action) make('hud-btn', toast, 'button', action[0]).onclick = () => { toast.classList.remove('show'); action[1](); };
+    toast.classList.toggle('act', !!action);
     toast.classList.add('show');
     clearTimeout(timer);
-    timer = window.setTimeout(() => toast.classList.remove('show'), 1800);
+    timer = window.setTimeout(() => toast.classList.remove('show'), action ? 5000 : 1800);
   };
   const now = () => gameTime(state.world.clock);
   const uid = (kind: string) => `${kind}:player:${Math.floor(state.world.clock.totalMinutes)}:${Math.random().toString(36).slice(2, 8)}`;
@@ -275,9 +279,10 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     for (const job of jobs) button(row(job.name, `${placeName(job.placeId)} · ${job.durationMinutes / 60}시간 · `
       + `${job.hourlyWage * job.durationMinutes / 60}결`), '일하기', () => work(job), state.player.placeId !== job.placeId);
     title(`${placeName(state.player.placeId)} 가게`);
-    const shops = state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null);
+    const shops = state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null), listed = new Set<string>();
     if (!shops.length) note('여기엔 가게가 없어요. 찻방·교환소·뜰에 가 보세요.');
-    for (const b of shops) for (const s of b.store.stock) button(row(items.find(i => i.id === s.itemId)?.name ?? s.itemId,
+    // C112: two shops here selling the same thing show one row (the first shop's).
+    for (const b of shops) for (const s of b.store.stock) if (!listed.has(s.itemId) && listed.add(s.itemId)) button(row(items.find(i => i.id === s.itemId)?.name ?? s.itemId,
       () => `${s.price}결 · 진열 ${s.displayed} · 창고 ${s.backroom}`), '사기', () => buy(b, s.itemId));
     title('가진 물건');
     if (!owned().length) note('아직 없어요.');
@@ -384,7 +389,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     nextBark();
     crowdText.hidden = mute.hidden = !inside;
     crowdText.textContent = `${crowd().name} · 손님 ${sc?.present.length ?? 0}명`;
-    mute.textContent = isMuted() ? '🔇' : '🔔';
+    mute.textContent = isMuted() ? '🔇' : '🔊';
     const u = inside ? sc?.asks[0] : undefined;
     usualBox.hidden = !u;
     if (u && guessing !== u.npcId) {
@@ -425,7 +430,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     }
     const days = Math.ceil((e.startAt - minute) / 1440), worker = residents.find(n => n.id === e.workers[0])?.name ?? '인부';
     make('', cityBox, 'div', e.stage === 'announced'
-      ? `${['오늘', '내일', '모레'][days] ?? `${days}일 뒤`} 07:00부터 ${roadworks.days}일 · 앞 주차 ${parkingSpaces}→0칸 · 도보 출입 가능\n${worker}: “${cityLines.rumor}”`
+      ? `${['오늘', '내일', '모레'][days] ?? `${days}일 뒤`} 07:00부터 ${roadworks.days}일 · 앞\u00a0주차\u00a0${parkingSpaces}\u2060→\u20600칸 · 도보 출입 가능\n${worker}: “${cityLines.rumor}”`
       : `앞길 공사 중 · ${Math.ceil((e.endAt - minute) / 1440)}일 남음\n차 손님 못 옴 ${e.impact.carFails} · 인부 구매 ${e.impact.workerBuys}`);
     make('', make('', cityBox, 'details'), 'summary', '왜 공사하나요').after(cityLines.why);
     const btns = make('haggle-btns', cityBox), food = shop?.store.stock.find(st => items.find(i => i.id === st.itemId)?.category === 'food');
@@ -434,8 +439,22 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     button(btns, '그대로 영업', answer('none'));
   }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
+  // C112: an item of the player's shop running out gets one line and a customer's word, once per sell-out.
+  const empty = new Set<string>();
+  function soldOut() {
+    const lease = state.leases.find(l => !l.ended), b = state.book.businesses.find(x => x.id === lease?.businessId && x.closedAt === null);
+    for (const s of b?.store.stock ?? []) {
+      const out = s.displayed + s.backroom === 0 && b!.store.events.some(e => e.reason === 'purchased' && e.itemId === s.itemId);
+      if (out && !empty.has(s.itemId)) {
+        const name = items.find(i => i.id === s.itemId)?.name ?? s.itemId;
+        say(`${name}${josa(name, '이', '가')} 다 떨어졌어요 · 주문하거나 상자를 받아 오세요`);
+        if (b!.placeId === state.player.placeId) { lines.push(`손님: “어, ${name} 다 팔렸어요?”`); nextBark(); }
+      }
+      if (out) empty.add(s.itemId); else empty.delete(s.itemId);
+    }
+  }
   function render(force = false) {
-    patronsUi(); cityUi();
+    patronsUi(); cityUi(); soldOut();
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
@@ -475,7 +494,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     Array.from(tabBar.children).forEach((element, index) => element.classList.toggle('on', Object.keys(tabs)[index] === tab));
     body.classList.toggle('shop', tab === 'shop');
     ({ people, work: chores, stock: stocks, chat, shop: () => shopTab(session, { body, residents, make, button, row, title, note, live,
-      contacts, stage, placeName, hiring: selected === 'hire', hire: on => { selected = on ? 'hire' : ''; } }),
+      contacts, stage, placeName, say, visit: placeId => act(() => { go(placeId); return `${placeName(placeId)} 도착`; }), hiring: selected === 'hire', hire: on => { selected = on ? 'hire' : ''; } }),
       biz: () => workTab(session, { body, residents, make, button, row, title, note, act, selected, select: id => { selected = id; } }) })[tab]();
     body.scrollTop = tab === 'chat' && selected ? body.scrollHeight : scroll;
   }
@@ -483,7 +502,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   setInterval(render, 1000);
   return { stick, knob, say, ready: () => document.getElementById('loading')?.remove(),
     // The clock stops while the player reads the 결폰 or the skip question; main shows 멈춤 for those and dialogue.
-    reading: () => !panel.hidden || !ask.hidden || performance.now() < slowUntil, paused(on: boolean) { pause.hidden = !on; },
+    reading: () => !panel.hidden || !ask.hidden || !cityBox.hidden || performance.now() < slowUntil, paused(on: boolean) { pause.hidden = !on; },
+    home() { tab = 'shop'; }, // C112 ⑦: a new game's first 결폰 opens on 내 가게
     // ?phone=<tab>[,<placeId>] opens the panel (screenshots); door() gets the nearest door, or nothing.
     open(next: string, placeId?: string) {
       if (placeId && places.some(p => p.id === placeId)) act(() => go(placeId));

@@ -72,7 +72,7 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 }
 .bark, .haggle { padding: 8px 12px; border-radius: 14px 14px 14px 4px; background: rgba(255, 252, 244, 0.95); color: #2b2018; white-space: pre-line; }
 .bark[hidden], .haggle[hidden] { display: none; }
-.haggle { pointer-events: auto; }
+.haggle { pointer-events: auto; word-break: keep-all; } /* C112 ⑨: '앞 주차 2→0칸' stays on one line */
 .haggle-btns { display: flex; gap: 6px; margin-top: 6px; }
 .haggle-btns .hud-btn { flex: 1; min-height: 44px; padding: 0 8px; white-space: nowrap; background: #4a3a2c; }
 .haggle-btns .hud-btn:first-child { background: #c8742c; }
@@ -179,3 +179,8 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 }
 .intro-card p { margin: 0 0 6px; }
 .intro-card .hud-open { min-width: 160px; height: 46px; margin-top: 8px; }
+/* C112: a toast with one button (가기) takes taps; the shop's next-step line sits at the top, not sticky. */
+.toast.act { pointer-events: auto; display: flex; align-items: center; gap: 10px; }
+.toast.act:not(.show) { pointer-events: none; }
+.toast .hud-btn { flex: none; }
+.hud-now.hud-next { position: static; margin: 0 0 8px; }

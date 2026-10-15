@@ -51,7 +51,7 @@ export function workTab(session: Session, h: { body: HTMLElement; residents: rea
     return;
   }
   h.title('받은 제안');
-  if (!shown(s).length) h.note('아직 받은 제안이 없어요. 단골 이야기를 듣거나 직접 알아보세요.');
+  const empty = h.note('아직 받은 제안이 없어요. 단골 이야기를 듣거나 직접 알아보세요.');
   for (const x of shown(s)) {
     const line = h.row(`${who(x.npcId)?.name ?? x.npcId} · ${defOf(x).title}`, `${x.status === 'offered' ? '새 제안' : '검토 중'} · ${x.until - today}일 남음`);
     line.classList.add('tap');
@@ -65,6 +65,7 @@ export function workTab(session: Session, h: { body: HTMLElement; residents: rea
     line.classList.add('tap');
     line.onclick = () => h.act(() => h.select(`ai|${'npcId' in x ? runAi(session, (cx, st) => start(cx, st, x.id)).id : x.id}|novice`));
   }
+  if (empty.nextElementSibling?.classList.contains('hud-row')) empty.remove(); // C112: only when nothing is listed below
   h.title('다른 사업 알아보기');
   const chips = h.make('hud-chips', h.body);
   if (h.selected !== 'ask') return h.button(chips, '다른 사업 알아보기', () => h.select('ask'));
@@ -73,7 +74,6 @@ export function workTab(session: Session, h: { body: HTMLElement; residents: rea
     h.select(found?.id ?? '');
     return found ? `${who(found.npcId)?.name ?? ''} 님이 답했어요` : '아직 답한 사람이 없어요. 내일 다시 볼게요';
   });
-  h.note('다른 산업은 곧 열려요. 문의에 돈은 들지 않아요.');
 }
 
 /** 내 가게 안: 단골이 구매를 마치고 고민을 한마디. '무슨 일 있어요?'를 누르면 업무 탭 제안으로 이어진다. */
@@ -124,7 +124,7 @@ function aiView(session: Session, h: Hud, selected: string) {
   } else if (!c.scope) {
     // 범위 후보는 하나씩 비교(버튼 3개 이하): 이걸로 / 다른 범위 보기, 되돌리기는 머리줄에.
     const ids = Object.keys(dev.work) as ScopeId[], k = ids.includes(peek as ScopeId) ? peek as ScopeId : ids[0], p = preview(k);
-    person(s.devs[c.dev!], dev.label, `${scopes[k].name}${k === 'list' ? '' : '까지'}면 자동 ${p.auto}건, 사람 확인 ${p.check}건이고 주소 없는 주문은 늘 사장님 확인이에요.`);
+    person(s.devs[c.dev!], dev.label, `${scopes[k].name}${k === 'list' ? '' : '까지'}면 자동으로 처리 ${p.auto}건 · 사람이 확인 ${p.check}건이에요. 주소 없는 주문은 늘 사장님이 확인해요.`);
     h.button(chips, `이걸로 할게요 · ${scopes[k].price}결`, () => { run((cx, st) => pickScope(cx, st, id, k)); });
     h.button(chips, '다른 범위 보기', () => h.select(`ai|${id}|${ids[(ids.indexOf(k) + 1) % ids.length]}`));
     h.button(head, '이전 선택으로', () => { run((cx, st) => back(cx, st, id)); });
@@ -184,13 +184,14 @@ function aiView(session: Session, h: Hud, selected: string) {
     if (ok && c.next) h.button(chips, `${scopes[c.next].name} 이야기 듣기 (새 계약)`, () => h.select(`ai|${run((cx, st) => followUp(cx, st, id)).id}|novice`));
     h.make('hud-verdict', h.body, 'div', ok ? `정산 끝 · 받은 돈 ${price}결, 개발자에게 ${c.pay === 'successOnly' ? dev.successFee : fee(c)}결`
       : `환급 ${refund(s, c) - c.owed}결${c.owed ? ` · 남은 채무 ${c.owed}결` : ''} · 개발자 착수비는 한 일 값으로 남아요`);
-    if (ok) h.note(r ? `어제 실제 주문 · 자동 ${r.auto}건 / 사람 확인 ${r.check}건(${r.minutes}분)` : '내일부터 실제 주문 처리 기록이 쌓여요');
+    if (ok) h.note(r ? `어제 실제 주문 · 자동으로 처리 ${r.auto}건 · 사람이 확인 ${r.check}건(${r.minutes}분)` : '내일부터 실제 주문 처리 기록이 쌓여요');
     now = ok ? (c.next ? '다음 일감 듣기' : '납품 완료') : `종료 · ${c.cause}`;
   } else if (c.stage === 'cancelled') {
     person(c.clientId, '고객', '이번엔 없던 일로 하고 다음에 또 얘기해요.');
     now = '계약 취소됨';
   } else {
-    person(s.devs[c.dev!], dev.label, `${c.stage === 'reworking' ? '고치는 중이고 ' : ''}${dev.hours[0]}~${dev.hours[1]}시 쉬는 때에만 작업해서 ${Math.floor((c.work - c.left) * 100 / c.work)}% 했어요.`);
+    person(s.devs[c.dev!], dev.label, `${c.stage === 'reworking' ? '고치는 중이에요. ' : ''}지금 ${Math.floor((c.work - c.left) * 100 / c.work)}% 했어요.`);
+    h.note(`개발자가 쉬는 시간(${dev.hours[0]}~${dev.hours[1]}시)에 작업해요`);
     now = '다음 일까지 넘기며 기다리기';
   }
   h.make('hud-now', h.body, 'div', `지금 할 일 · ${now}`);
