@@ -46,6 +46,7 @@
 5. C023b 합친 뒤: 세션을 화면에 연결(시각·돈 HUD 최소, 자동 저장 연결)
 6. 리세 외형 시제품(R016a 얼굴 SDF·램프·천사 고리, R010·R011 외형) — 화면 카드, 사용자 판단
 7. 경제 2단계(생성 주민 50명·가게 여러 곳, R015)
+다음 후보(판단 불필요): 캐릭터가 늘어 빌드가 10MB에 닿으면 단일 HTML → 분리 빌드(MASTER_FEEDBACK 7순위; check.sh·play-publish·GHA 스크린샷 함께 수정). C062 텍스처 형식 변환은 절감 2%라 버림.
 사용자 확인 대기:
 - Blender로 처음부터 만든 리세(C061): https://3-34-132-123.sslip.io/lise-b.html?model=lise-b&debug=1 — VRoid판(lise.html)과 비교해 이 방향으로 계속할지
 - R017 Neural4D 결제는 Blender 결과 보고 판단
