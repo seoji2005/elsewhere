@@ -198,6 +198,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
         if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
           !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
         addResidents(state);
+        state.market.hints ??= [];
         checkShape(state, { ...freshState(), world: createWorld() });
         if (parsed.version < 3) state.bonds = seedLegacy(state.world, state.encounters);
         checkSocial(state);
@@ -308,7 +309,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
     const atWork = Object.entries({ office: ['빛씨 조율사', '빛고리 조율실 수석 조율사', '밤결 기록사'],
       cafe: ['잔향 차 배합사'], shop: ['공유물 순환지기'], park: ['떠오름 뜰 돌봄사'] })
       .some(([place, jobs]) => place === placeId && jobs.includes(npc.job));
-    return { actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
+    return { market: state.player.placeId === placeId ? state.market : undefined, actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
       scene: { placeId, atWork, peopleCount: residents.filter(n => whereIs(n, time) === placeId).length
         + Number(state.player.placeId === placeId),
       bond: state.relationMode === 'bonds' ? readBond(state.bonds, npcId, 'player') : undefined } };

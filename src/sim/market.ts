@@ -1,22 +1,39 @@
-import { companies } from '../data/companies';
+import { companies, companyJobs } from '../data/companies';
 import { transfer, type LedgerState } from './ledger';
 import type { GameTime } from './clock';
 
 export interface MarketEvent { companyId: string; size: number; days: number }
+export interface MarketHint extends MarketEvent { dueDay: number }
 export interface MarketState {
+  hints?: MarketHint[];
   seed: number; day: number; prices: Record<string, number>; events: MarketEvent[];
   revenue: Record<string, number>; holdings: Record<string, Record<string, number>>;
 }
 const known = (id: string) => companies.some(company => company.id === id);
 export function createMarket(seed = 1): MarketState {
-  return { seed: seed >>> 0, day: 1, prices: Object.fromEntries(companies.map(c => [c.id, c.basePrice])),
+  const market: MarketState = { seed: seed >>> 0, day: 1, prices: Object.fromEntries(companies.map(c => [c.id, c.basePrice])),
     events: [], revenue: {}, holdings: {} };
+  scheduleEvents(market);
+  return market;
 }
 // Event size and revenue change are signed fractions (0.1 means +10%).
 export function applyEvent(market: MarketState, event: MarketEvent): void {
   if (!known(event.companyId) || !Number.isFinite(event.size) ||
       !Number.isSafeInteger(event.days) || event.days < 1) throw Error('Invalid market event');
   market.events.push({ ...event });
+}
+// Keep one seeded future event per company; retain pending schedules from older saves.
+function scheduleEvents(market: MarketState): void {
+  for (const [index, company] of companies.entries()) {
+    if (market.hints?.some(hint => hint.companyId === company.id)) continue;
+    const roll = (Math.imul(market.seed ^ market.day, 1664525) + 1013904223 + index) >>> 0;
+    (market.hints ??= []).push({ companyId: company.id, size: roll % 2 ? 0.08 : -0.08,
+      days: 2, dueDay: market.day + 4 + roll % 7 });
+  }
+}
+export function revealMarketHint(market: MarketState, job: string): MarketHint | undefined {
+  return market.hints?.find(hint => hint.companyId === companyJobs[job]
+    && hint.dueDay > market.day && hint.dueDay <= market.day + 3);
 }
 export function recordNpcRevenue(market: MarketState, npcId: string, change: number): void {
   const company = companies.find(c => c.npcId === npcId);
@@ -26,6 +43,11 @@ export function recordNpcRevenue(market: MarketState, npcId: string, change: num
   market.revenue[company.id] = total;
 }
 export function advanceDay(market: MarketState): void {
+  scheduleEvents(market);
+  for (const hint of market.hints ?? []) if (hint.dueDay <= market.day + 1) {
+    applyEvent(market, { companyId: hint.companyId, size: hint.size, days: hint.days });
+  }
+  if (market.hints) market.hints = market.hints.filter(hint => hint.dueDay > market.day + 1);
   for (const company of companies) {
     market.seed = (Math.imul(market.seed, 1664525) + 1013904223) >>> 0;
     const noise = (market.seed / 4294967296 * 2 - 1) * company.volatility;
@@ -37,6 +59,7 @@ export function advanceDay(market: MarketState): void {
   market.events = market.events.map(e => ({ ...e, days: e.days - 1 })).filter(e => e.days > 0);
   market.revenue = {};
   market.day++;
+  scheduleEvents(market);
 }
 export interface Trade {
   id: string; time: GameTime; account: string; companyId: string; quantity: number; side: 'buy' | 'sell';

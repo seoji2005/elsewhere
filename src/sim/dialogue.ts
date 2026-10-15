@@ -1,4 +1,6 @@
-import { dialogueFor, sharedMemoryTemplates } from '../data/dialogue';
+import { companies } from '../data/companies';
+import { revealMarketHint, type MarketState } from './market';
+import { dialogueFor, sharedMemoryTemplates, marketHintLines } from '../data/dialogue';
 import type { Npc } from '../data/npcs';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
@@ -13,6 +15,7 @@ export interface DialogueState {
   dating: { actorId: string; npcId: string }[];
 }
 export interface DialogueContext {
+  market?: MarketState;
   actorId: string; npc: Npc; time: GameTime; value: number;
   scene?: { placeId: string; peopleCount: number; atWork: boolean; bond?: Bond };
 }
@@ -60,8 +63,12 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   const choices: DialogueChoice[] = ctx.npc.likes.map((topic, index) => ({
     id: `chat:${index}`, topic, tone: ctx.npc.traits[0] ?? 'quiet',
   }));
-  return { line: sharedLine ?? (familiar && past && past.created < now
-    ? memoryLine(past) : familiar ? template.familiar : template.greeting),
+  const hint = ctx.market && ctx.scene?.bond && friendly(ctx.scene.bond) && informalFor(ctx)
+    ? revealMarketHint(ctx.market, ctx.npc.job) : undefined;
+  const hintLine = hint ? marketHintLines[hint.size > 0 ? 'good' : 'bad']
+    .replace('{company}', companies.find(c => c.id === hint.companyId)!.name) : '';
+  return { line: (sharedLine ?? (familiar && past && past.created < now
+    ? memoryLine(past) : familiar ? template.familiar : template.greeting)) + (hintLine ? ` ${hintLine}` : ''),
     // The legacy 90-point label is numeric; dating is only established by mutual consent.
     stage: ctx.value >= 90 && !isDating(state, ctx.actorId, ctx.npc.id)
       ? '호감' : relationshipStage(ctx.value), choices };
