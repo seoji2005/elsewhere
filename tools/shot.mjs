@@ -1,7 +1,6 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { distURL } from './serve.mjs';
 
 const args = process.argv.slice(2);
 const queries = args.filter(arg => arg !== '--smoke');
@@ -45,7 +44,7 @@ try {
     await page.close(); page = await newPage(); previousQuery = undefined;
   }
   if (key !== previousQuery) {
-    const url = pathToFileURL(resolve('dist-single/index.html')).href + '?' + key;
+    const url = distURL + '?' + key;
     try {
       await page.goto(url);
       await page.locator('canvas[data-ready="true"]').waitFor();
