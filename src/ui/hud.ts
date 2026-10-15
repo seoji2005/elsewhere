@@ -48,9 +48,13 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const [timeText, placeText, cashText, energyText, weatherText, warnText] = [0, 1, 2, 3, 4, 5].map(() => make('', status, 'span'));
   warnText.className = 'hud-warn';
   weatherText.className = 'hud-weather';
+  const pause = make('hud-pause', status, 'span', '멈춤'), skip = make('hud-open hud-skip', top, 'button', '다음 일까지 ▶▶');
   const phone = make('hud-open', top, 'button', '결폰 열기');
+  // GDD §2: skipping asks first with one line — where it stops and why.
+  const ask = make('hud-ask'), askText = make('', ask, 'span');
+  let skipTarget = 0;
   const panel = make('hud-panel'), tabBar = make('hud-tabs', panel), body = make('hud-body', panel);
-  enter.hidden = panel.hidden = true;
+  enter.hidden = panel.hidden = ask.hidden = pause.hidden = true;
   let tab: Tab = 'people', selected = '', said = '', nearDoor: Door | undefined, timer = 0, shown = '';
   let pending = false;
   const pointers = new Set<number>();
@@ -128,6 +132,13 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     render(true);
   }
   phone.onclick = () => show(panel.hidden ? tab : '');
+  skip.onclick = () => {
+    show('');
+    const next = session.nextEvent();
+    skipTarget = next.minute; askText.textContent = `${next.reason} 넘길까요?`; ask.hidden = false;
+  };
+  make('hud-btn', ask, 'button', '넘기기').onclick = () => act(() => { ask.hidden = true; session.skipTo(skipTarget); });
+  make('hud-btn', ask, 'button', '취소').onclick = () => { ask.hidden = true; };
   for (const id of Object.keys(tabs) as Tab[]) make('', tabBar, 'button', tabs[id]).onclick = () => { selected = ''; show(id); };
   enter.onclick = () => act(() => {
     if (!nearDoor) return;
@@ -343,6 +354,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   render();
   setInterval(render, 1000);
   return { stick, knob, say, ready: () => document.getElementById('loading')?.remove(),
+    // The clock stops while the player reads the 결폰 or the skip question; main shows 멈춤 for those and dialogue.
+    reading: () => !panel.hidden || !ask.hidden, paused(on: boolean) { pause.hidden = !on; },
     // ?phone=<tab>[,<placeId>] opens the panel (screenshots); door() gets the nearest door, or nothing.
     open(next: string, placeId?: string) {
       if (placeId && places.some(p => p.id === placeId)) act(() => go(placeId));

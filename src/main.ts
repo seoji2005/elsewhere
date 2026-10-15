@@ -23,7 +23,7 @@ import { hud } from './ui/hud';
 import { talkScene } from './ui/talk';
 import { debugOverlay } from './ui/debug';
 import { paint } from './scene/props';
-import { createSession } from './game/session';
+import { createSession, NEW_GAME_SPEED } from './game/session';
 import { localStorageAdapter } from './game/storage';
 import { npcs } from './data/npcs';
 import { doors as cornerDoors, townDoors } from './data/doors';
@@ -86,7 +86,7 @@ if (blob) {
   scene.add(blob);
 }
 // The life simulation: clock, wallets, residents, shops and market; autosaves every game hour and when hidden.
-const session = createSession(localStorageAdapter());
+const session = createSession(localStorageAdapter(), undefined, undefined, NEW_GAME_SPEED);
 const player = session.state.player;
 character.group.position.set(player.x, 0, player.z);
 character.group.rotation.y = player.direction;
@@ -259,7 +259,9 @@ renderer.setAnimationLoop(now => {
   ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
   positionElapsed += dt;
   if (positionElapsed >= 0.2) { syncPosition(); positionElapsed = 0; }
-  if (session.tick(Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
+  const reading = talk.active() || ui.reading(); // GDD §2: no time pressure while reading
+  ui.paused(reading);
+  if (session.tick(reading ? 0 : Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
   cast.forEach(person => person.update(0, Math.min(dt, 0.1)));
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);

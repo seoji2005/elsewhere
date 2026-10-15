@@ -33,7 +33,7 @@ import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusi
 import { jobs } from '../data/jobs';
 import { createMessengerState, send, due, meetSlot, replyLine, type MessageKind } from '../sim/messenger';
 import type { Storage } from './storage';
-export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60;
+export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60, NEW_GAME_SPEED = 2; // game minutes per real second (GDD §2)
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
 const businessProducerJobs: Readonly<Record<string, string>> = { ...producerJobs, lamp: '빛씨 조율사' };
 const personalEmployer: Record<string, string> = { cafe: 'nuel', shop: 'sori', market: 'aro' };
@@ -185,7 +185,7 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
         || n.mode === 'rumor' && [1, 2].includes(n.hops) && n.sourceId !== n.observerId && n.learned >= n.created + 60 * n.hops));
   }
 }
-export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems) {
+export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems, newGameSpeed = 1) {
   let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null, tycoonReady = false;
   const ctxFor = (t: TycoonState, people: readonly Npc[], time = gameTime(state.world.clock)): TycoonCtx => ({
     world: state.world, book: state.book, leases: state.leases, purses: state.purses, residents: people,
@@ -329,7 +329,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   } catch (error) { if (state === unseeded) seed(); loadResult = { ok: false, error }; }
   const residents = addResidents(state);
   const ctx = (t = state.tycoon, time?: GameTime) => ctxFor(t, residents, time);
-  if (!tycoonReady) state.tycoon = createTycoon(systems, ctx);
+  if (!tycoonReady) { state.tycoon = createTycoon(systems, ctx); state.world.clock.minutesPerSecond = newGameSpeed; } // saves keep their speed
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
@@ -818,6 +818,35 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
+  // GDD §2: the earliest thing worth waking for (morning, opening, a delivery, an appointment, a shift), else an hour on.
+  const nextEvent = (): { minute: number; reason: string } => {
+    const now = Math.floor(state.world.clock.totalMinutes), t = now % 1440, today = now - t;
+    const daily = (at: number) => today + at + (today + at <= now ? 1440 : 0);
+    const found: [number, string][] = [
+      ...t >= 1260 || t < 420 ? [[daily(420), '아침'] as [number, string]] : t < 540 ? [[today + 540, '영업 시작'] as [number, string]] : [],
+      ...state.leases.flatMap(l => l.orders.filter(o => !o.delivered).map(o => [o.arrival, '상자 도착'] as [number, string])),
+      ...state.matchmaking.appointments.filter(a => ['scheduled', 'offered'].includes(a.status))
+        .map(a => [minuteOf(a.time), a.id.startsWith('meet:') ? '약속' : '소개팅'] as [number, string]),
+      ...state.work.shifts.filter(s => s.actorId === 'player')
+        .flatMap(s => [[s.startedAt, '근무 시작'], [s.endsAt, '근무 끝']] as [number, string][]),
+      ...state.book.employment.filter(e => e.leftAt === null && state.book.businesses.some(b => b.id === e.businessId && b.ownerId === 'player'))
+        .map(e => [daily(e.job.fromMinute), '직원 출근'] as [number, string]),
+    ];
+    const [minute, what] = found.filter(([m]) => m > now).sort((a, b) => a[0] - b[0])[0] ?? [now + 60, ''];
+    const days = Math.floor(minute / 1440) - Math.floor(now / 1440), at = gameTime({ totalMinutes: minute, minutesPerSecond: 1, paused: false });
+    const when = `${days === 1 ? '내일 ' : days > 1 ? `${at.day}일째 ` : ''}${String(at.hour).padStart(2, '0')}:${String(at.minute).padStart(2, '0')}`;
+    return { minute, reason: `${when}${what ? ` ${what}` : ''}까지` };
+  };
+  // Every skipped minute goes through tick, so deliveries, wages and expiries happen exactly as if played; then saves.
+  const skipTo = (minute: number): SaveResult => {
+    const clock = state.world.clock, { minutesPerSecond, paused } = clock;
+    if (minute > clock.totalMinutes) {
+      Object.assign(clock, { minutesPerSecond: 1, paused: false });
+      try { tick(minute - clock.totalMinutes + 1e-6); clock.totalMinutes = minute; } // epsilon: float sums must reach the minute
+      finally { Object.assign(clock, { minutesPerSecond, paused }); }
+    }
+    return saveNow();
+  };
   const tycoon = {
     ctx: () => ctx(),
     state: () => state.tycoon,
@@ -827,5 +856,5 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const result = fn(ctx(), state.tycoon.systems[systemId] as S); saveNow(); return result;
     },
   };
-  return { state, loadResult, tick, saveNow, startWork, ...social, ...shops, tycoon };
+  return { state, loadResult, tick, saveNow, nextEvent, skipTo, startWork, ...social, ...shops, tycoon };
 }
