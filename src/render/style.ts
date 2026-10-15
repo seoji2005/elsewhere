@@ -39,4 +39,9 @@ export const spots: Record<string, { at: V3; eye: V3; aim: V3 }> = {
   C: { at: [-1.5, -3.2, Math.PI / 2], eye: [4, 1.5, -2.5], aim: [-60, 3.7, -4.5] }, // S5 street canyon, 1.5 m, 2° up
   D: { at: [22.5, 19.5, -2.28], eye: [26, 1.51, 22], aim: [-30, 1.51, -26] }, // S4 open lot to the skyline, level
   E: { at: [-7, -6, 0], eye: [-2, 13, 2], aim: [-30, 5.95, -27] }, // S3 12 m up, 10° down
+  // ?town=1 (C077): T1 the south row (조율실, 교환소, 찻방) from the far sidewalk, T2 the north row (뜰, 공동집, 두 집),
+  // T3 떠오름 뜰 from the crossing.
+  T1: { at: [-27.5, -6.4, 0.3], eye: [-18, 1.6, 4.4], aim: [-33, 3.4, -9.5] },
+  T2: { at: [-30, 6.4, Math.PI], eye: [-24, 1.6, -7.6], aim: [-34.5, 3.6, 9.5] },
+  T3: { at: [-14.5, 8.6, 2.6], eye: [-7.4, 1.7, 6.6], aim: [-19, 2, 19] },
 };
