@@ -22,12 +22,45 @@ export function createLedger(balances: Record<string, number> = {}): LedgerState
   return { balances: { ...balances }, transactions: [] };
 }
 
+// Wage retries hit transfer every minute; index retired IDs by prefix. compactLedger is the only writer and resets it.
+const retiredIndex = new WeakMap<object, Map<string, Set<string>>>();
+function retiredSuffixes(retired: Record<string, Record<string, string[]>>): Map<string, Set<string>> {
+  let index = retiredIndex.get(retired);
+  if (!index) {
+    index = new Map();
+    for (const group of Object.values(retired)) for (const [prefix, suffixes] of Object.entries(group)) {
+      const set = index.get(prefix) ?? new Set();
+      for (const suffix of suffixes) set.add(suffix);
+      index.set(prefix, set);
+    }
+    retiredIndex.set(retired, index);
+  }
+  return index;
+}
+
+// Same answer as transactions.find by id; the list is only appended to or replaced, so index the new tail.
+const txIndex = new WeakMap<Transaction[], { size: number; ids: Map<string, Transaction> }>();
+export function findTransaction(ledger: LedgerState, id: string): Transaction | undefined {
+  const list = ledger.transactions;
+  let index = txIndex.get(list);
+  if (!index || index.size > list.length) txIndex.set(list, index = { size: 0, ids: new Map() });
+  for (; index.size < list.length; index.size++) {
+    const entry = list[index.size];
+    if (!index.ids.has(entry.id)) index.ids.set(entry.id, entry);
+  }
+  return index.ids.get(id);
+}
+
+// True when transfer would report this ID as a duplicate.
+export function isRecorded(ledger: LedgerState, id: string): boolean {
+  const cut = id.lastIndexOf(':') + 1, prefix = id.slice(0, cut), suffix = id.slice(cut);
+  return !!(ledger.history?.ids.includes(id) ||
+      (ledger.history?.retired !== undefined && retiredSuffixes(ledger.history.retired).get(prefix)?.has(suffix)) ||
+      findTransaction(ledger, id));
+}
+
 export function transfer(ledger: LedgerState, transaction: Transaction): TransferResult {
-  const cut = transaction.id.lastIndexOf(':') + 1, prefix = transaction.id.slice(0, cut), suffix = transaction.id.slice(cut);
-  if (ledger.history?.ids.includes(transaction.id) ||
-      Object.values(ledger.history?.retired ?? {}).some(group => group[prefix]?.includes(suffix)) ||
-      ledger.transactions.some(entry => entry.id === transaction.id))
-    return { ok: true, duplicate: true };
+  if (isRecorded(ledger, transaction.id)) return { ok: true, duplicate: true };
   const { id, from, to, amount, time } = transaction;
   if (!id || !Number.isSafeInteger(amount) || amount <= 0) return { ok: false, error: 'Invalid transaction' };
   if (!Number.isSafeInteger(time.day) || time.day < 1 || !Number.isInteger(time.hour) ||
@@ -69,4 +102,5 @@ export function compactLedger(ledger: LedgerState, beforeDay: number): void {
     }
     return false;
   });
+  if (history.retired) retiredIndex.delete(history.retired);
 }
