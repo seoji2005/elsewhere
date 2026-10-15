@@ -79,6 +79,14 @@ function proportion(vrm: VRM, sd: number) {
 let motions: ReturnType<typeof loadAssets> | undefined;
 export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outfits[0], phase = 0) {
   const [vrm, motion] = await Promise.all([cloneModel(outfit), motions ??= loadAssets('people')]);
+  // Frustum culling with one fixed sphere (model.ts switches it off): skinned bounds are never recomputed per frame
+  // and the sphere covers every SD proportion, so people behind the camera cost no draw calls.
+  const bounds = new T.Sphere(new T.Vector3(0, 0.8, 0), 1.4);
+  vrm.scene.traverse(object => {
+    if (!(object instanceof T.Mesh)) return;
+    object.frustumCulled = true;
+    if (object instanceof T.SkinnedMesh) object.boundingSphere = bounds; else object.geometry.boundingSphere = bounds;
+  });
   // Precise bounds include skinned vertices; update skeleton matrices after each rest-pose scale change.
   const height = () => {
     vrm.scene.updateMatrixWorld(true);
