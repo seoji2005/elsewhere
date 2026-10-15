@@ -16,6 +16,8 @@ import { reviewDays } from '../sim/advisors';
 import { adChannels, adMessages, adModels, segmentNames, segments } from '../data/ads';
 import { planCampaign, type CampaignInput } from '../sim/ads';
 import { buyCampaign, running, type AdState } from '../game/tycoon/ads';
+import type { SceneState } from '../game/tycoon/scene';
+import { fill, sceneLines } from '../data/shopScene';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -64,7 +66,8 @@ export function shopKey(state: State) {
   return [state.leases.map(l => [l.id, l.ended, l.businessId, l.orders.filter(o => !o.delivered).length, l.reports.length]), haulOf(state).load,
     b ? staff(state, b.id).map(e => e.actorId) : [], reading,
     counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages,
-    adsOf(state)?.campaigns.map(c => [c.id, c.revealed, c.broken])];
+    adsOf(state)?.campaigns.map(c => [c.id, c.revealed, c.broken]),
+    !!(state.tycoon.systems.scene as SceneState | undefined)?.first];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
 const lines: Record<string, [string, string]> = {
@@ -133,6 +136,9 @@ export function shopTab(session: Session, ui: ShopUi) {
     });
     button(make('hud-chips', body), '광고 내기', () => { adStep = 0; adMore = false; adDraft = {}; });
   }
+  const first = (state.tycoon.systems.scene as SceneState | undefined)?.first; // C095b ⑤: the album's one line
+  if (first) title('사진첩'), note(`📷 ${fill(sceneLines.album, { name: ui.residents.find(n => n.id === first.npcId)?.name ?? first.npcId,
+    item: itemName(first.itemId), price: first.price })} · ${Math.floor(first.minute / 1440) + 1}일째 ${hhmm(first.minute % 1440)}`);
   const load = carried(haulOf(state));
   if (load) button(row(`들고 있는 상자 📦×${load}`, state.player.placeId === b.placeId ? '가게 안이에요' : `${ui.placeName(b.placeId)} 가게로 가져가세요 · 걸음이 느려요`),
     '뒷방에 내려놓기', () => `상자 ${session.tycoon.command('haul', (ctx, h: HaulState) => dropAtShop(ctx, h))}개를 뒷방에 넣었어요`,
