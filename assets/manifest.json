@@ -44,7 +44,12 @@
     "clips": [
       "Idle_Loop",
       "Walk_Loop",
-      "Jog_Fwd_Loop"
+      "Jog_Fwd_Loop",
+      "Sitting_Enter",
+      "Sitting_Idle_Loop",
+      "Sitting_Exit",
+      "Interact",
+      "Idle_Talking_Loop"
     ]
   },
   "street": {
