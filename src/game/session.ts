@@ -18,6 +18,7 @@ import type { ShopEvent, TycoonCtx, TycoonSystem } from './tycoon/system';
 import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
 import { applyPersona, decideWithPersona } from '../sim/persona';
 import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
+import { sign, type CounselState } from './tycoon/counsel';
 import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
@@ -368,8 +369,10 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     return b;
   };
   const shops = {
-    rentStore(storefrontId: string) {
-      const lease = rentStorefront(state.leases, state.world.ledger, storefrontId, gameTime(state.world.clock));
+    /** With a counsel contract id the lease is signed through it (C101); without one it stays a plain lease. */
+    rentStore(storefrontId: string, contractId?: string) {
+      const lease = contractId ? tycoon.command('counsel', (c, s: CounselState) => sign(c, s, contractId, storefrontId))
+        : rentStorefront(state.leases, state.world.ledger, storefrontId, gameTime(state.world.clock));
       saveNow(); return lease;
     },
     terminateStore() { endLease(activeLease(), state.book, state.world.ledger, gameTime(state.world.clock)); saveNow(); },
