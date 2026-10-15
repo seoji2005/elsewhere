@@ -1,16 +1,20 @@
 import { storefronts, retailDemand, shopKinds, shopStock, type ShopKind } from '../data/storefronts';
 import { rentStorefront, endLease, jobOffer, type Lease } from '../sim/business';
-import { npcs } from '../data/npcs';
+import { npcs, type Npc } from '../data/npcs';
 import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
 import type { Customer } from '../sim/customer';
 import { chooseWeatherNeed, weatherFor, demandWeight } from '../sim/weather';
-import { advanceClock, gameTime } from '../sim/clock';
+import { advanceClock, gameTime, type GameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
 import { compactLedger } from '../sim/ledger';
 import { restoreWorld } from '../sim/save';
+import { roll as tycoonRoll, settle as tycoonSettle, nextId as tycoonNextId } from '../sim/tycoonCore';
+import { tycoonSystems } from './tycoon/registry';
+import type { TycoonCtx, TycoonSystem } from './tycoon/system';
+import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
@@ -118,7 +122,7 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
-    dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds', messenger: createMessengerState() };
+    dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds', messenger: createMessengerState(), tycoon: emptyTycoon() };
 }
 // Check required structures before exposing a restored state to simulation ticks.
 function checkShape(value: unknown, template: unknown): void {
@@ -181,8 +185,13 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
         || n.mode === 'rumor' && [1, 2].includes(n.hops) && n.sourceId !== n.observerId && n.learned >= n.created + 60 * n.hops));
   }
 }
-export function createSession(storage: Storage, npcSeed?: number) {
-  let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null;
+export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems) {
+  let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null, tycoonReady = false;
+  const ctxFor = (t: TycoonState, people: readonly Npc[], time = gameTime(state.world.clock)): TycoonCtx => ({
+    world: state.world, book: state.book, leases: state.leases, purses: state.purses, residents: people,
+    npcSeed: state.npcSeed, player: state.player, time, systems: t.systems,
+    roll: (system, entity, index) => tycoonRoll(state.npcSeed, system, entity, index),
+    settle: (batchId, legs) => tycoonSettle(state.world.ledger, batchId, legs, time), nextId: kind => tycoonNextId(t, kind) });
   supplyDay(state, addResidents(state, true, true));
   let loadResult: SaveResult = { ok: true };
   const backup = () => {
@@ -200,7 +209,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
           state.world = restoreWorld(raw);
           state.player.placeId = state.world.people.player?.placeId ?? state.player.placeId;
           state.market.day = gameTime(state.world.clock).day;
-        } else if ([2, 3, 4, 5].includes(parsed?.version)) state = parsed.state;
+        } else if ([2, 3, 4, 5, 6].includes(parsed?.version)) state = parsed.state;
         else throw Error('Unsupported session version');
         state.npcSeed = parsed.version === 1 ? 0 : state.npcSeed ?? 0;
         if (parsed.version < 3) Object.assign(state, { dialogue: createDialogueState(), bonds: createBonds(),
@@ -214,8 +223,9 @@ export function createSession(storage: Storage, npcSeed?: number) {
         // Generated identities are omitted from saves; wallets and contracts are retained.
         if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
           !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
-        addResidents(state);
+        const loaded = addResidents(state);
         state.market.hints ??= [];
+        if (parsed.version < 6) state.tycoon = emptyTycoon(); // v5 and older open with an empty container.
         checkShape(state, { ...freshState(), world: createWorld() });
         if (Object.values(state.reputation).some(n => !Number.isFinite(n) || n < -100 || n > 100))
           throw Error('Invalid reputation');
@@ -309,10 +319,13 @@ export function createSession(storage: Storage, npcSeed?: number) {
         generate(state.npcSeed, 0); // Validate the saved uint32 seed before accepting the save.
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
-      } catch (error) { state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); damaged = raw; loadResult = { ok: false, error }; backup(); }
+        state.tycoon = restoreTycoon(state.tycoon, systems, t => ctxFor(t, loaded)); tycoonReady = true;
+      } catch (error) { tycoonReady = false; state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); damaged = raw; loadResult = { ok: false, error }; backup(); }
     }
   } catch (error) { loadResult = { ok: false, error }; }
   const residents = addResidents(state);
+  const ctx = (t = state.tycoon, time?: GameTime) => ctxFor(t, residents, time);
+  if (!tycoonReady) state.tycoon = createTycoon(systems, ctx);
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
@@ -321,7 +334,9 @@ export function createSession(storage: Storage, npcSeed?: number) {
       backup(); // Never overwrite a damaged save until its backup succeeds.
       if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
       const people = Object.fromEntries(Object.entries(state.world.people).filter(([id]) => !id.startsWith('generated-')));
-      storage.setItem(SESSION_KEY, JSON.stringify({ version: 5, state: { ...state, world: { ...state.world, people } } }));
+      // An empty tycoon container reads back identically from v5, so older builds can still open it.
+      const version = state.tycoon.seq || Object.keys(state.tycoon.systems).length ? 6 : 5;
+      storage.setItem(SESSION_KEY, JSON.stringify({ version, state: { ...state, world: { ...state.world, people } } }));
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };
     } catch (error) { return { ok: false, error }; }
@@ -752,6 +767,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         settleShops(now.day - 1);
         advanceDay(state.market); state.settledDay = now.day - 1;
+        runDay(state.tycoon, systems, t => ctx(t, { day: now.day - 1, hour: 23, minute: 59 }), now.day - 1);
         if (state.populationEconomy) {
           // Cash-funded production bonuses circulate surplus to poorer workers; contracts and arrears stay intact.
           if (book.businesses.some(b => b.ownerId === 'player' && b.closedAt === null)) for (const npc of [...residents].sort((a, b) =>
@@ -784,6 +800,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       }
       expireVisits(state.store, now);
       resolveMatches(now);
+      runMinute(state.tycoon, systems, ctx, minute);
       state.economyMinute = minute;
     }
     state.world.clock.totalMinutes = target;
@@ -794,5 +811,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
-  return { state, loadResult, tick, saveNow, startWork, ...social, ...shops };
+  const tycoon = {
+    ctx: () => ctx(),
+    state: () => state.tycoon,
+    /** Runs a player command against one system's state, then saves. */
+    command<T, S = any>(systemId: string, fn: (ctx: TycoonCtx, s: S) => T): T {
+      if (!systems.some(s => s.id === systemId)) throw Error('Unknown tycoon system');
+      const result = fn(ctx(), state.tycoon.systems[systemId] as S); saveNow(); return result;
+    },
+  };
+  return { state, loadResult, tick, saveNow, startWork, ...social, ...shops, tycoon };
 }
