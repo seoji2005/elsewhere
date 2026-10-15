@@ -16,6 +16,8 @@ export interface TycoonCtx {
   settle(batchId: string, legs: readonly Leg[]): TransferResult;
   /** tycoonCore.nextId on the saved tycoon sequence. */
   nextId(kind: string): string;
+  /** Where a resident is at ctx.time (tick-size independent). world.people[].placeId is only refreshed at the end of a tick — do not read it. */
+  placeOf(npcId: string): string;
   /** Other systems' states: read only. */
   systems: Readonly<Record<string, unknown>>;
 }

@@ -96,3 +96,16 @@ it('C093: invalid system state backs up the save and starts a new game; unknown 
   expect(fresh.state.world.clock.totalMinutes).toBe(0);
   expect(fresh.tycoon.state().systems.counter).toEqual({ count: 0, hits: 0 });
 });
+
+it('placeOf gives the same resident places for whole and split ticks (Codex review P1)', () => {
+  const seen: Record<string, string[]> = { whole: [], split: [] };
+  const probe = (key: 'whole' | 'split'): TycoonSystem<{ n: number }> => ({
+    id: 'probe', create: () => ({ n: 0 }), validate: raw => raw as { n: number },
+    onMinute: (ctx, s, minute) => { if (minute % 97 === 0) seen[key].push(ctx.residents.slice(0, 5).map(r => ctx.placeOf(r.id)).join(',')); s.n++; },
+  });
+  const whole = createSession(memory(), 123, [probe('whole')]);
+  whole.tick(1440);
+  const split = createSession(memory(), 123, [probe('split')]);
+  for (let i = 0; i < 1440; i++) split.tick(1);
+  expect(seen.split).toEqual(seen.whole);
+});

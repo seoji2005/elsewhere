@@ -190,6 +190,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   const ctxFor = (t: TycoonState, people: readonly Npc[], time = gameTime(state.world.clock)): TycoonCtx => ({
     world: state.world, book: state.book, leases: state.leases, purses: state.purses, residents: people,
     npcSeed: state.npcSeed, player: state.player, time, systems: t.systems,
+    placeOf: id => { const n = people.find(p => p.id === id); return n ? staffPlace(n, time) : state.world.people[id]?.placeId ?? ''; },
     roll: (system, entity, index) => tycoonRoll(state.npcSeed, system, entity, index),
     settle: (batchId, legs) => tycoonSettle(state.world.ledger, batchId, legs, time), nextId: kind => tycoonNextId(t, kind) });
   // v2+ saves replace the whole state, so only seed the fresh one when it is kept (C092: load cost).
