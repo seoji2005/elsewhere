@@ -1,4 +1,5 @@
 import { npcs } from '../data/npcs';
+import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
@@ -344,6 +345,23 @@ export function createSession(storage: Storage, npcSeed?: number) {
     if (whereIs(npc, time) !== state.player.placeId) throw Error('지금 여기 없어요');
   };
   const social = {
+    availableCompanions() {
+      const time = gameTime(state.world.clock), minute = time.hour * 60 + time.minute;
+      return companionEvents.filter(event => state.relationMode === 'bonds'
+        && minute >= event.fromMinute && minute < event.untilMinute && state.player.placeId === event.placeId
+        && whereIs(residents.find(n => n.id === event.npcId)!, time) === event.placeId
+        && !state.dialogue.memories[event.npcId]?.entries.some(m =>
+          m.sourceEventId === `companion:${event.id}:${time.day}`));
+    },
+    joinCompanion(eventId: string) {
+      const event = social.availableCompanions().find(event => event.id === eventId);
+      if (!event) return false;
+      const time = gameTime(state.world.clock);
+      return completeShared({ id: `companion:${event.id}:${time.day}`, actorId: 'player',
+        participants: ['player', event.npcId], kind: 'shared-work', time, status: 'completed',
+        placeId: event.placeId, placeName: state.world.places[event.placeId].name,
+        activityName: event.activityName }, { trust: 3, respect: 2, comfort: 3 });
+    },
     stageFor(npcId: string) {
       const ctx = context(npcId);
       if (state.relationMode === 'bonds') return stageOf(state.bonds, npcId, 'player', state.dialogue);
