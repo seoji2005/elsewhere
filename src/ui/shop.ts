@@ -7,7 +7,7 @@ import { friendly, readBond } from '../sim/bonds';
 import { gameTime } from '../sim/clock';
 import { dailySummary } from '../sim/store';
 import { weatherFor } from '../sim/weather';
-import type { createSession } from '../game/session';
+import type { createSession, DayReport } from '../game/session';
 import type { PatronState } from '../game/tycoon/patrons';
 import { personas } from '../data/personas';
 import { carried, dropAtShop, pickupOrder, pickupProblem, type HaulState } from '../game/tycoon/haul';
@@ -180,6 +180,9 @@ export function shopTab(session: Session, ui: ShopUi) {
     make(r.net < 0 ? 'neg' : '', bar, 'i').style.height = `${Math.abs(r.net) / max * 60}px`;
     make('', bar, 'span', `${r.day}일`);
   }
+  const report = lease.reports.at(-1) as Partial<DayReport> | undefined; // C107: every cost the net subtracts (older reports lack tax·ads·parking)
+  if (report) note(`${report.day}일: 매출 ${report.revenue}결 − 원가 ${report.cost} · 임대료 ${report.rent} · 급여 ${report.wages}` +
+    ` · 세금 ${report.tax ?? 0} · 광고 ${report.ads ?? 0} · 주차 ${report.parking ?? 0} = 순이익 ${signed(report.net!)}결`);
 
   // C101: every article is readable from the start; the lawyer adds risk and fix lines next to the ones found.
   function contract(counsel: CounselState, d: Draft, u: typeof storefronts[number]) {

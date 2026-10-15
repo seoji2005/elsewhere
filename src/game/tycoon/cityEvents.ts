@@ -1,5 +1,5 @@
 // C100 원인 있는 도시 사건: 세금 → 정비 승인 → 도로 공사(예고·주차 통제·인부) → 종료·복원. 시 계정이 있는 세계에서만 움직인다.
-import { partnerLot, preparedCity, roadworks, taxRate } from '../../data/cityEvents';
+import { partnerLot, preparedCity, roadworks, taxHoliday, taxRate } from '../../data/cityEvents';
 import { items } from '../../data/items';
 import { activeAt, authorizeProblem, closure, validCauses, type CityState, type Response, type RoadEvent } from '../../sim/cityEvents';
 import type { TycoonCtx, TycoonSystem } from './system';
@@ -58,6 +58,13 @@ export function respond(ctx: TycoonCtx, s: CityState, kind: Response['kind'], it
 }
 /** 확인만(복원 안내 등). */ export function readNotice(_: TycoonCtx, s: CityState): void { const e = currentEvent(s); if (e) e.seen.push(e.stage); }
 
+/** 인부의 아침은 한 번: 근무 중이거나 오늘 이미 어디서 샀으면 이 가게에서 새 구매를 만들지 않는다(C107: 광고 가산과 무관하게 차단). */
+function banned(ctx: TycoonCtx, s: CityState, v: { npcId: string; hour: number }): boolean {
+  if (!closure(s, now(ctx))?.workers.includes(v.npcId)) return false;
+  return v.hour !== roadworks.mealFrom / 60 ||
+    ctx.book.businesses.some(b => b.store.events.some(x => x.reason === 'purchased' && x.time.day === ctx.time.day && x.actorId === v.npcId));
+}
+
 const valid = (s: CityState) => s?.version === 1 && (s.prepare === undefined || s.prepare === true) && Array.isArray(s.requests) && Array.isArray(s.events) && Array.isArray(s.notices) &&
   Number.isSafeInteger(s.revenue) && Number.isSafeInteger(s.spent) && s.spent <= s.revenue && !!s.tax && typeof s.tax === 'object' &&
   Array.isArray(s.causes) && validCauses(s.causes) && s.events.every(e => s.causes.some(c => c.id === e.causeId && c.kind === 'roadworks') &&
@@ -93,19 +100,20 @@ export const cityEvents: TycoonSystem<CityState> = {
     // 매출세: 누적 과세매출의 5%에서 이미 낸 세액을 뺀다. 잔액이 모자라면 미납으로 남고 수입이 아니다.
     for (const b of ctx.book.businesses.filter(b => b.ownerId === 'player')) {
       const t = s.tax[b.id] ??= { taxable: 0, paid: 0 };
-      t.taxable += b.store.events.filter(e => e.reason === 'purchased' && e.time.day === day).reduce((n, e) => n + e.amount, 0);
+      // C107: 신규 사업자 감면 — 개업일부터 taxHoliday일 동안의 판매는 과세매출이 아니다.
+      if (day >= Math.floor(b.openedAt / 1440) + 1 + taxHoliday)
+        t.taxable += b.store.events.filter(e => e.reason === 'purchased' && e.time.day === day).reduce((n, e) => n + e.amount, 0);
       const amount = Math.min(Math.floor(t.taxable * taxRate / 100) - t.paid, ctx.world.ledger.balances[b.ownerId]);
       if (amount > 0 && ctx.settle(`tax:${b.id}:${day}`, [{ from: b.ownerId, to: CITY, amount, reason: `Tax: ${b.id}` }]).ok)
         t.paid += amount, s.revenue += amount;
     }
     authorize(ctx, s, day);
   },
+  blocksVisit: (ctx, s, v) => banned(ctx, s, v),
   visitBonus(ctx, s, v) {
-    const minute = now(ctx), e = closure(s, minute);
+    const e = closure(s, now(ctx));
     if (!e?.workers.includes(v.npcId)) return 0;
-    // 인부의 아침은 한 번: 근무 중이거나 오늘 이미 어디서 샀으면 이 가게에서 새 구매를 만들지 않는다.
-    const ate = ctx.book.businesses.some(b => b.store.events.some(x => x.reason === 'purchased' && x.time.day === ctx.time.day && x.actorId === v.npcId));
-    if (v.hour !== roadworks.mealFrom / 60 || ate) return -100;
+    if (banned(ctx, s, v)) return -100;
     const menu = e.responses.find(r => r.kind === 'breakfast'), b = ctx.book.businesses.find(b => b.id === v.businessId);
     return roadworks.workerBonus + (menu && (b?.store.stock.find(st => st.itemId === menu.itemId)?.displayed ?? 0) > 0 ? roadworks.menuBonus : 0);
   },

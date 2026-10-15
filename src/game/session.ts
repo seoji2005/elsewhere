@@ -1,5 +1,5 @@
 import { storefronts, retailDemand, shopKinds, shopStock, type ShopKind } from '../data/storefronts';
-import { rentStorefront, endLease, jobOffer, type Lease } from '../sim/business';
+import { rentStorefront, endLease, jobOffer, type Lease, type ShopReport } from '../sim/business';
 import { npcs, type Npc } from '../data/npcs';
 import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
@@ -42,6 +42,8 @@ import { jobs } from '../data/jobs';
 import { createMessengerState, send, due, meetSlot, replyLine, type MessageKind } from '../sim/messenger';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60, NEW_GAME_SPEED = 2; // game minutes per real second (GDD §2)
+/** C107: the daily report with the day's tax, ad and parking-partner costs (older saves' reports lack them). */
+export type DayReport = ShopReport & { tax: number; ads: number; parking: number };
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
 const businessProducerJobs: Readonly<Record<string, string>> = { ...producerJobs, lamp: '빛씨 조율사' };
 const personalEmployer: Record<string, string> = { cafe: 'nuel', shop: 'sori', market: 'aro' };
@@ -202,7 +204,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     npcSeed: state.npcSeed, player: state.player, time, systems: t.systems,
     placeOf: id => { const n = people.find(p => p.id === id); return n ? staffPlace(n, time) : state.world.people[id]?.placeId ?? ''; },
     roll: (system, entity, index) => tycoonRoll(state.npcSeed, system, entity, index),
-    settle: (batchId, legs) => tycoonSettle(state.world.ledger, batchId, legs, time), nextId: kind => tycoonNextId(t, kind) });
+    settle: (batchId, legs) => tycoonSettle(state.world.ledger, batchId, legs, time), nextId: kind => tycoonNextId(t, kind),
+    shopEvent: e => shopEvent(e) });
   // v2+ saves replace the whole state, so only seed the fresh one when it is kept (C092: load cost).
   const unseeded = state, seed = () => supplyDay(state, addResidents(state, true, true));
   let loadResult: SaveResult = { ok: true };
@@ -343,8 +346,9 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   // C100: only a brand-new world gets the city's starting ledger (never an existing save), on its first minute.
   if (fresh && deliveryFees && systems.includes(cityEvents)) (state.tycoon.systems.cityEvents as CityState).prepare = true;
   // C095 demand hooks, player's shop only (see TycoonSystem.visitBonus / onShopEvent).
+  // C107: a system's ban is checked first and is never offset by another system's bonus.
   const visitBonus = (v: { npcId: string; businessId: string; hour: number }) =>
-    Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
+    systems.some(sys => sys.blocksVisit?.(ctx(), state.tycoon.systems[sys.id], v)) ? -Infinity : Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
   const shopEvent = (e: ShopEvent) => { for (const sys of systems) sys.onShopEvent?.(ctx(), state.tycoon.systems[sys.id], e); };
   const haulState = () => state.tycoon.systems.haul as HaulState | undefined;
   if (!tycoonReady && deliveryFees && haulState()) haulState()!.fee = true;
@@ -394,12 +398,12 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const stock = b.store.stock.find(s => s.itemId === itemId);
       if (!Number.isSafeInteger((stock?.backroom ?? 0) + (stock?.displayed ?? 0) + quantity +
           lease.orders.filter(o => !o.delivered && o.itemId === itemId).reduce((n, o) => n + o.quantity, 0))) throw Error('Stock overflow');
-      const id = `${lease.id}:order:${lease.orders.length}`;
+      const id = `${lease.id}:order:${lease.orders.length}`, fee = shops.deliveryCost(itemId, quantity);
       const result = procure(state.book, state.world.people, state.world.ledger, b.id, producer, itemId,
         quantity, Math.max(1, Math.floor(item.price / 4)), id, now);
       if (result.ok && !result.duplicate) {
         // C096: the delivery fee passes through the producer to a courier resident (no money created).
-        const courier = residents.find(n => n.job === COURIER_JOB && n.id !== producer.id), fee = shops.deliveryCost(itemId, quantity);
+        const courier = residents.find(n => n.job === COURIER_JOB && n.id !== producer.id);
         if (courier && fee) tycoonSettle(state.world.ledger, `${id}:fee`, [{ from: 'player', to: producer.id, amount: fee, reason: `Procurement: ${b.id}:delivery:${fee}` },
           { from: producer.id, to: courier.id, amount: fee, reason: `Delivery: ${id}` }], now);
         b.store.stock.find(s => s.itemId === itemId)!.backroom -= quantity;
@@ -407,7 +411,14 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       }
       return result;
     },
-    deliveryCost: (itemId: string, quantity: number) => haulState()?.fee ? deliveryFee(quantity * unitCost(itemId)) : 0,
+    /** C107: the courier brings the day's orders in one run — the fee is on the day's combined order, less what today's run already charged. */
+    deliveryCost(itemId: string, quantity: number) {
+      if (!haulState()?.fee) return 0;
+      const b = playerShop(), day = gameTime(state.world.clock).day, sent = (fee: boolean) => state.world.ledger.transactions.filter(t =>
+        t.from === 'player' && t.time.day === day && t.reason.startsWith(`Procurement: ${b.id}:`) &&
+        t.reason.startsWith(`Procurement: ${b.id}:delivery:`) === fee).reduce((n, t) => n + t.amount, 0);
+      return Math.max(0, deliveryFee(sent(false) + quantity * unitCost(itemId)) - sent(true));
+    },
     setShopPrice(itemId: string, price: number) { setPrice(playerShop().store, itemId, price); saveNow(); },
     offerJob(npcId: string, hourlyWage: number) {
       const b = playerShop(), now = gameTime(state.world.clock), npc = residents.find(n => n.id === npcId);
@@ -463,8 +474,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       if (!lease.ended) lease.rentDue.push(day);
       lease.rentDue = lease.rentDue.filter(d => !payPerson(world.people, world.ledger, { id: `${lease.id}:rent:${d}`,
         from: 'player', to: unit.landlordId, amount: unit.dailyRent, time: now, reason: `Rent: ${lease.id}` }).ok);
-      const shifts = state.work.shifts.filter(s => s.employerId === 'player' && s.endsAt <= minuteOf(now) &&
-        book.employment.some(e => e.businessId === b?.id && e.job.id === s.jobId));
+      const shifts = shiftsOf(b?.id, now);
       for (const shift of shifts) if (!shift.paid) payCompletedShift(book, world.people, world.ledger, b!.id, shift, now);
       const unpaid = shifts.some(s => !s.paid) || lease.rentDue.length > 0;
       lease.arrears = unpaid ? lease.arrears + 1 : 0;
@@ -472,12 +482,24 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       if (!lease.ended && lease.arrears >= 3) {
         endLease(lease, book, world.ledger, now); lease.warning = 'shop.closed.arrears';
       }
-      const tx = world.ledger.transactions.filter(t => t.from === 'player' && t.time.day === day);
+    }
+  };
+  const shiftsOf = (businessId: string | undefined, now: GameTime) => state.work.shifts.filter(s => s.employerId === 'player' &&
+    s.endsAt <= minuteOf(now) && state.book.employment.some(e => e.businessId === businessId && e.job.id === s.jobId));
+  // C107: after the day's costs are final (rent, wages, then the systems' tax): the report's net is the shop's wallet change.
+  const reportShops = (day: number) => {
+    const now = { day, hour: 23, minute: 59 };
+    for (const lease of state.leases) {
+      const b = state.book.businesses.find(b => b.id === lease.businessId), shifts = shiftsOf(b?.id, now);
+      const tx = state.world.ledger.transactions.filter(t => t.from === 'player' && t.time.day === day);
       const sum = (predicate: (t: typeof tx[number]) => boolean) => tx.filter(predicate).reduce((n, t) => n + t.amount, 0);
       const cost = sum(t => t.reason.startsWith(`Procurement: ${b?.id}:`)), rent = sum(t => t.reason === `Rent: ${lease.id}`);
-      const wages = sum(t => shifts.some(s => s.id === t.id));
+      const wages = sum(t => shifts.some(s => s.id === t.id)), tax = sum(t => t.reason === `Tax: ${b?.id}`);
+      const ads = sum(t => t.reason.startsWith('Ad: ')), parking = sum(t => t.reason.startsWith('Parking: '));
       const summary = dailySummary(b?.store ?? createStore('player', []), day);
-      lease.reports.push({ ...summary, cost, rent, wages, net: summary.revenue - cost - rent - wages, reputation: state.reputation.player });
+      const report: DayReport = { ...summary, cost, rent, wages, tax, ads, parking,
+        net: summary.revenue - cost - rent - wages - tax - ads - parking, reputation: state.reputation.player };
+      lease.reports.push(report);
       lease.reports = lease.reports.slice(-7);
     }
   };
@@ -763,7 +785,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= (retail ? retailDemand.visitChance : 45) +
                 15 * demandWeight(stock.itemId, now.day) + (b.ownerId === 'player' ? visitBonus({ npcId: npc.id, businessId: b.id, hour: now.hour }) : 0)) continue;
             const event = { npcId: npc.id, businessId: b.id, itemId: stock.itemId, price: stock.price, count: 1 };
-            if (pat && !park(ctx(), pat, npc.id, persona!)) { shopEvent({ ...event, result: 'parkingFull' }); continue; }
+            // C107: driving is the base persona's habit; promotion to regular does not change how they come.
+            if (pat && !park(ctx(), pat, npc.id, pat.personas[npc.id])) { shopEvent({ ...event, result: 'parkingFull' }); continue; }
             if (need && stock.price > need.maxPrice) {
               // A haggler asks the owner in person; with nobody to ask it is a lost 'expensive' sale.
               if (persona && state.player.placeId === b.placeId && decideWithPersona(need, { itemId: stock.itemId, price: stock.price,
@@ -832,6 +855,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
         settleShops(now.day - 1);
         advanceDay(state.market); state.settledDay = now.day - 1;
         runDay(state.tycoon, systems, t => ctx(t, { day: now.day - 1, hour: 23, minute: 59 }), now.day - 1);
+        reportShops(now.day - 1);
         if (state.populationEconomy) {
           // Cash-funded production bonuses circulate surplus to poorer workers; contracts and arrears stay intact.
           if (book.businesses.some(b => b.ownerId === 'player' && b.closedAt === null)) for (const npc of [...residents].sort((a, b) =>

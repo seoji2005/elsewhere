@@ -64,7 +64,9 @@ export function answerHaggle(ctx: TycoonCtx, s: PatronState, visitId: string, ac
     visitStore(b.store, ctx.world.ledger, visitId, h.npcId, { itemId: h.itemId, maxPrice: accept ? price : list - 1 }, 1, ctx.time);
     if (!accept) return say(ctx, s, h.npcId, 'expensive'), false;
     const sale = checkoutBusiness(ctx.book, ctx.world.people, ctx.world.ledger, b.id, ctx.purses[h.npcId], visitId, ctx.time);
-    if (sale.ok && !sale.duplicate) patrons.onShopEvent!(ctx, s, { ...h, price, count: 1, result: 'purchased' });
+    // C107: through the registry like any other sale (opportunity, ads, city), or patrons alone without a session.
+    const e: ShopEvent = { npcId: h.npcId, businessId: h.businessId, itemId: h.itemId, price, count: 1, result: 'purchased' };
+    if (sale.ok && !sale.duplicate) ctx.shopEvent ? ctx.shopEvent(e) : patrons.onShopEvent!(ctx, s, e);
     return sale.ok;
   } finally { setPrice(b.store, h.itemId, list); }
 }
