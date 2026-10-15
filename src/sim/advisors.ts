@@ -6,7 +6,7 @@ import type { GameTime } from './clock';
 
 export type Sample = () => number; // [0, 1) 균등 난수
 export interface Advisor { kind: AdvisorKind; tier: Tier; account: string; hiredWeek: number; hasSpendingAuthority: boolean }
-export interface TaxBook { underpaid: number; auditRisk: number; errors: number }
+export interface TaxBook { underpaid: number; auditRisk: number; errors: number; owed: number } // owed: 추징 후 미납 채무
 export interface Clause { kind: ClauseKind; article: number; effect: Record<string, number> }
 export interface Contract {
   kind: ContractKind; seed: number; title: string; weeklyAmount: number; weeks: number; clauses: Clause[];
@@ -30,7 +30,7 @@ const roll = (sample: Sample) => {
 };
 const natural = (n: number) => Number.isSafeInteger(n) && n >= 0;
 
-export const createTaxBook = (): TaxBook => ({ underpaid: 0, auditRisk: 0, errors: 0 });
+export const createTaxBook = (): TaxBook => ({ underpaid: 0, auditRisk: 0, errors: 0, owed: 0 });
 export const weeklyFee = (a: Advisor) => advisorKinds[a.kind].weeklyFee[a.tier];
 // 근속 0주 → 0, loyaltyWeeks 이상 → 1.
 export function loyalty(a: Advisor, week: number): number {
@@ -44,9 +44,9 @@ export const embezzleRate = (a: Advisor, week: number) =>
 
 // 이번 주 세금 계산. 실수하면 일부를 덜 신고하고(나중에 추징) 세무조사 위험이 쌓인다.
 export function weeklyTax(profit: number, accountant: Advisor | null, week: number, book: TaxBook, sample: Sample) {
-  if (!natural(profit)) throw Error('Invalid profit');
+  if (!Number.isSafeInteger(profit)) throw Error('Invalid profit'); // 적자 주는 음수, 과세는 0
   if (accountant && accountant.kind !== 'accountant') throw Error('Not an accountant');
-  const full = Math.floor(profit * tax.rate);
+  const full = Math.floor(Math.max(0, profit) * tax.rate);
   const saved = accountant ? Math.floor(full * tiers[accountant.tier].saving) : 0;
   const mistake = roll(sample) < mistakeRate(accountant, week);
   const missing = mistake ? Math.floor((full - saved) * tax.underreport) : 0;
@@ -56,12 +56,19 @@ export function weeklyTax(profit: number, accountant: Advisor | null, week: numb
   return { due: full - saved - missing, saved, mistake };
 }
 
-// 세무조사. 걸리면 덜 낸 세금 + 가산금을 추징하고 장부 위험을 초기화한다.
+// 세무조사. 걸리면 덜 낸 세금 + 가산금이 미납 채무(owed)로 넘어가고 위험은 초기화된다. 채무는 payOwed로 갚는다.
 export function audit(book: TaxBook, sample: Sample) {
   if (roll(sample) >= book.auditRisk) return { audited: false, charge: 0 };
   const charge = book.underpaid + Math.floor(book.underpaid * tax.penalty);
-  Object.assign(book, createTaxBook());
+  Object.assign(book, { underpaid: 0, auditRisk: 0, errors: 0, owed: book.owed + charge });
   return { audited: true, charge };
+}
+// 가진 만큼만 납부하고 실제로 새로 이체된 금액만 채무에서 뺀다.
+export function payOwed(ledger: LedgerState, book: TaxBook, from: string, to: string, time: GameTime, id: string): number {
+  const amount = Math.min(book.owed, ledger.balances[from] ?? 0), r = settle(ledger, id, from, to, amount, time, '세금 추징');
+  if (!r.ok || r.duplicate || amount === 0) return 0;
+  book.owed -= amount;
+  return amount;
 }
 
 // 자금 집행 권한을 받은 1등급만 아주 드물게 잔액의 일부를 빼돌린다. 반환값은 빼돌리려는 금액(0이면 없음).
@@ -75,7 +82,9 @@ export const SUSPICIOUS = '경비(증빙 없음)';
 export function embezzle(ledger: LedgerState, a: Advisor, owner: string, week: number, sample: Sample,
   time: GameTime, id: string): number {
   const amount = embezzleAmount(a, week, ledger.balances[owner] ?? 0, sample);
-  return amount && settle(ledger, id, owner, a.account, amount, time, SUSPICIOUS).ok ? amount : 0;
+  if (!amount) return 0;
+  const r = settle(ledger, id, owner, a.account, amount, time, SUSPICIOUS);
+  return r.ok && !r.duplicate ? amount : 0;
 }
 export const investigate = (ledger: LedgerState, account: string) =>
   ledger.transactions.filter(t => t.to === account && t.reason === SUSPICIOUS);

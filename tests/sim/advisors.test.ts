@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { advisorKinds, advisorLines, clauses, type AdvisorKind, type Tier } from '../../src/data/advisors';
 import {
-  advisorLine, audit, createTaxBook, embezzle, embezzleAmount, generateContract, investigate, mistakeRate, reviewContract,
+  advisorLine, audit, createTaxBook, payOwed, embezzle, embezzleAmount, generateContract, investigate, mistakeRate, reviewContract,
   reviewDays, rng, settle, summarizeObligations, weeklyFee, weeklyTax, type Advisor,
 } from '../../src/sim/advisors';
 import { createLedger } from '../../src/sim/ledger';
@@ -101,8 +101,7 @@ it('keeps the total balance constant across tax, fee, audit and embezzlement tra
     expect(settle(ledger, `tax:${w}`, 'player', 'city', weeklyTax(800, a, w, book, r).due, t, '세금').ok).toBe(true);
     expect(settle(ledger, `fee:${w}`, 'player', 'acc', weeklyFee(a), t, '수수료').ok).toBe(true);
     stolen += embezzle(ledger, a, 'player', w, r, t, `steal:${w}`);
-    const { charge } = audit(book, r);
-    if (charge) settle(ledger, `audit:${w}`, 'player', 'city', Math.min(charge, ledger.balances.player), t, '추징');
+    audit(book, r); payOwed(ledger, book, 'player', 'city', t, `audit:${w}`);
   }
   expect(total()).toBe(before);
   expect(investigate(ledger, 'acc').reduce((n, t) => n + t.amount, 0)).toBe(stolen);
@@ -116,4 +115,21 @@ it('has a line for every kind, tier and situation in plain modern Korean', () =>
       expect(advisorLine(kind, t, s)).toMatch(/[가-힣]/);
   }
   expect(JSON.stringify(advisorLines)).not.toMatch(/마법|마나|길드|영주|금화|골드|원\b/);
+});
+
+it('keeps unpaid audit charges as debt, taxes loss weeks at zero and ignores duplicate embezzlement', () => {
+  const book = createTaxBook(), time = { day: 1, hour: 9, minute: 0 };
+  expect(weeklyTax(-500, acc(3), 0, book, () => 0.99)).toEqual({ due: 0, saved: 0, mistake: false });
+  weeklyTax(1000, null, 0, book, () => 0); // 직접 신고 실수: 100결 덜 냄
+  expect(audit(book, () => 0)).toEqual({ audited: true, charge: 140 });
+  const ledger = createLedger({ player: 50, city: 0, acc: 0 });
+  expect(payOwed(ledger, book, 'player', 'city', time, 'owed:1')).toBe(50);
+  expect(payOwed(ledger, book, 'player', 'city', time, 'owed:1')).toBe(0);
+  expect(book.owed).toBe(90);
+  ledger.balances.player = 1000;
+  expect(payOwed(ledger, book, 'player', 'city', time, 'owed:2')).toBe(90);
+  expect(book.owed).toBe(0);
+  expect(embezzle(ledger, acc(1), 'player', 0, () => 0, time, 'steal:1')).toBe(91);
+  expect(embezzle(ledger, acc(1), 'player', 0, () => 0, time, 'steal:1')).toBe(0);
+  expect(investigate(ledger, 'acc')).toHaveLength(1);
 });
