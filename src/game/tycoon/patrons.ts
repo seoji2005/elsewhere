@@ -1,6 +1,9 @@
 // C095: C088 personas at the player's shop — assignment, regulars, parking, haggling and the customers' lines.
 import { personas, situations, type PersonaId, type Situation } from '../../data/personas';
-import { assignPersona, bark, parkingEffect, promotePersona } from '../../sim/persona';
+import { applyPersona, assignPersona, bark, parkingEffect, promotePersona } from '../../sim/persona';
+import type { Customer } from '../../sim/customer';
+import type { Npc } from '../../data/npcs';
+import { RIVAL } from '../../data/rival';
 import { restock, setPrice, visitStore } from '../../sim/store';
 import { checkoutBusiness } from '../../sim/business';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './system';
@@ -17,9 +20,30 @@ export interface PatronState {
 export const parkingSpaces = 2, haggleMinutes = 60;
 const minuteOf = (ctx: TycoonCtx) => (ctx.time.day - 1) * 1440 + ctx.time.hour * 60 + ctx.time.minute;
 
+// Stable daily decisions do not depend on tick size or iteration order.
+export function choice(seed: number, key: string): number {
+  let hash = seed;
+  for (const c of key) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
+  return hash;
+}
+/** C109: one customer for every shop. Personas shift tolerance only above the reference price: list prices never offend (C087 balance kept). */
+export function customerOf(seed: number, npc: Pick<Npc, 'id' | 'likes'>, persona?: PersonaId): Customer {
+  const customer = { likes: npc.likes, priceTolerance: 1 + choice(seed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
+  return persona ? { ...applyPersona(customer, persona), priceTolerance: Math.max(1, applyPersona(customer, persona).priceTolerance) } : customer;
+}
+/** The base persona, read only (saved on first sight at the player's shop; the draw is the same either way). */
+export const basePersona = (ctx: TycoonCtx, s: PatronState | undefined, npcId: string): PersonaId =>
+  s?.personas[npcId] ?? assignPersona(ctx.residents.find(n => n.id === npcId) ?? {}, ctx.roll('patrons', npcId, 0));
+/** C109 common purchase intent: one per resident and day, on the existing demand slot (the player's shop visit ID, as its draw). */
+export const intentOf = (ctx: TycoonCtx, npcId: string) =>
+  `${ctx.book.businesses.find(b => b.ownerId === 'player' && b.closedAt === null)?.id ?? 'town'}:${ctx.time.day}:${npcId}`;
+/** The shop that already took this resident's payment today, if any (one intent, one paying shop). */
+export const paidAt = (ctx: TycoonCtx, npcId: string) => ctx.book.businesses.find(b => (b.ownerId === 'player' || b.ownerId === RIVAL) &&
+  b.store.visits.some(v => [`${b.id}:${ctx.time.day}:${npcId}`, `${b.id}:haggle:${npcId}:${ctx.time.day}`].includes(v.id) && v.status === 'paid'))?.id;
+
 /** Base persona saved on first sight; three completed visits promote it to 'regular'. */
 export function personaOf(ctx: TycoonCtx, s: PatronState, npcId: string): PersonaId {
-  s.personas[npcId] ??= assignPersona(ctx.residents.find(n => n.id === npcId) ?? {}, ctx.roll('patrons', npcId, 0));
+  s.personas[npcId] ??= basePersona(ctx, s, npcId);
   return promotePersona(s.personas[npcId], s.visits[npcId] ?? 0);
 }
 // Big spenders and parking hogs always drive; half of the busy office workers do.
@@ -30,7 +54,7 @@ const drives = (ctx: TycoonCtx, id: PersonaId, npcId: string) =>
  * C100: during roadworks the street spaces are closed (base count untouched); a parking partnership offers its lot,
  * where every car is held for the round-trip walk.
  */
-export function park(ctx: TycoonCtx, s: PatronState, npcId: string, id: PersonaId): boolean {
+export function park(ctx: TycoonCtx, s: Pick<PatronState, 'parking' | 'lot'>, npcId: string, id: PersonaId): boolean {
   const now = minuteOf(ctx), city = ctx.systems.cityEvents as CityState | undefined, closed = !!closure(city, now);
   if (!drives(ctx, id, npcId) || onSite(city, npcId, now)) return true; // a roadworks crew walks over from the site
   const spaces = closed ? partnerSpaces(city, now) : parkingSpaces;

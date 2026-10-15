@@ -6,6 +6,7 @@ import { tycoonSystems } from '../../src/game/tycoon/registry';
 import { rival, rivalBonus, rivalView, type RivalState } from '../../src/game/tycoon/rival';
 import { planDay, type RivalView } from '../../src/sim/rival';
 import { segments } from '../../src/data/ads';
+import { basePersona, customerOf } from '../../src/game/tycoon/patrons';
 
 const DOREN = 'rival:doren';
 function setup(data = new Map<string, string>(), systems = tycoonSystems) {
@@ -115,3 +116,90 @@ it('C099 8: 30 days in one tick, hourly ticks and a mid-way save/resume agree; e
   a.to(32 * 1440); expect(sold(32)).toBeLessThan(usual / 2);
   expect(stock.backroom).toBeGreaterThanOrEqual(before); expect(a.total()).toBe(a.initial); expect(data.get(SESSION_KEY)).toBeTruthy();
 }, 60000); // 30 days run three ways take ~6s
+
+const paid = (f: ReturnType<typeof setup>, id: string) => f.shop(id).store.events.filter(e => e.reason === 'purchased');
+it('C109 1·2: one intent, one paying shop (any hour); Doren is held to the same parking and price tolerance', () => {
+  const f = setup(); f.to(1440 + 430); f.state.player.placeId = 'nest'; // nobody at the player's counter: Doren alone
+  f.shop(DOREN).store.stock.forEach(st => { st.price = 2 * st.price - 2; }); f.to(4 * 1440); // tea 14, bread 18
+  const later = (e: { time: { day: number; hour: number } }) => e.time.day + e.time.hour / 24 > 2.3, n = (id: string) => f.ctx().residents.find(r => r.id === id)!;
+  const tolerance = (id: string) => customerOf(123, n(id), basePersona(f.ctx(), undefined, id)).priceTolerance * 1.25; // rain lifts tea by 1/4
+  expect(paid(f, DOREN).filter(e => later(e) && e.amount > Math.floor((e.amount + 2) / 2 * tolerance(e.actorId)))).toEqual([]);
+  expect(f.shop(DOREN).store.events.filter(e => later(e) && e.reason === 'expensive').length).toBeGreaterThan(3);
+  const g = setup(); g.to(1440 + 400); g.rv().parking = [9e6, 9e6]; g.to(8 * 1440);
+  const drives = (id: string) => ['bigSpender', 'parkingHog'].includes(basePersona(g.ctx(), undefined, id));
+  expect(paid(g, DOREN).filter(e => e.time.day >= 2 && drives(e.actorId))).toEqual([]);
+  expect(paid(g, DOREN).filter(e => e.time.day >= 2).length).toBeGreaterThan(10);
+  const day = (e: { actorId: string; time: { day: number } }) => `${e.actorId}:${e.time.day}`, ours = new Set(paid(g, DOREN).map(day));
+  expect(paid(g, 'player').filter(e => ours.has(day(e)))).toEqual([]);
+  expect(paid(g, 'player').length).toBeGreaterThan(5);
+});
+
+it('C109 3: Doren sees the public shelf, the floor and only what he or his helper stood in front of', () => {
+  const a = setup(), b = setup(); a.to(1440 + 719); b.to(1440 + 719);
+  b.shop('player').store.stock.forEach(st => { st.backroom += 50; }); b.move('player', 'aro', 200);
+  a.to(1440 + 721); b.to(1440 + 721);
+  const mind = (f: typeof a) => ({ ...f.rv(), heard: null }); // what the customers went through may differ; Doren's books and views may not
+  expect(mind(b)).toEqual(mind(a)); expect(b.shop(DOREN).store.events).toEqual(a.shop(DOREN).store.events);
+  let seen = 0;
+  for (let m = 2 * 1440 + 720; m < 6 * 1440; m += m % 1440 === 720 ? 360 : 1080) {
+    a.to(m); const look = a.rv().observations.find(o => o.minute === m);
+    if (look) seen++, expect(a.ctx().placeOf(look.via)).toBe('cafe');
+    a.to(m + 1); expect(a.state.world.people.doren.placeId).toBe('shop');
+  }
+  expect(seen).toBeGreaterThan(0);
+});
+
+it('C109 4: orders then ads come out of one available sum that never touches rent, arrears or tax', () => {
+  const f = setup(); f.to(2 * 1440 + 419);
+  const s = f.rv(), reserve = () => 4 * (s.rentDue.length + 3) + Math.floor(s.tax.taxable * 5 / 100) - s.tax.paid;
+  f.move('doren', 'aro', f.bal('doren') - reserve() - 25);
+  s.plan = { ...s.plan!, day: 3, orders: { tea: 20, bread: 20 }, adBudget: 60 }; f.to(2 * 1440 + 421);
+  expect(f.bal('doren')).toBeGreaterThanOrEqual(reserve()); expect(s.plan!.done).toMatch(/^tea 12\/20 · bread 0\/20 · 광고/);
+  expect(f.state.world.ledger.transactions.filter(t => t.from === 'doren' && t.reason.startsWith('Ad:'))).toEqual([]);
+});
+
+it('C109 5: the last trading day pays rent and counts its taxable sales; debts stay; stock, helpers and lease end', () => {
+  const f = setup();
+  for (let day = 1; day <= 5; day++) { f.to(day * 1440 - 1); f.move('doren', 'aro'); f.to(day * 1440 + 1); }
+  const s = f.rv(), sold = paid(f, DOREN).reduce((n, e) => n + e.amount, 0);
+  expect([s.status, s.closeAt, s.tax.taxable, s.helpers]).toEqual(['closed', 5, sold, []]);
+  expect(s.rentDue).toContain(5); expect(f.shop(DOREN).store.stock.every(st => st.backroom + st.displayed === 0)).toBe(true);
+  f.move('aro', 'doren', 200); f.to(6 * 1440 + 1);
+  expect([s.rentDue, s.tax.paid, f.total()]).toEqual([[], Math.floor(sold * 5 / 100), f.initial]);
+});
+
+it('C109 6: a sold-out rumour carries its own visit, item and time', () => {
+  const a = setup(); a.to(3 * 1440);
+  const first = paid(a, DOREN).find(e => e.time.day === 2)!, other = first.itemId === 'tea' ? 'bread' : 'tea';
+  const at = (first.time.day - 1) * 1440 + first.time.hour * 60, b = setup(); b.to(at - 1);
+  b.rv().heard[first.actorId] = { visit: 'shop:x:2:velo', itemId: other, minute: at - 30 }; b.to(at + 1);
+  expect(b.rv().observations).toContainEqual({ kind: 'soldOut', minute: at - 30, itemId: other, value: 1, source: 'shop:x:2:velo', via: first.actorId });
+});
+
+// C108's '보통' play (owner 09~12, 6 per item) for 180 days, with and without Doren: residents' wallets and the shops' takings.
+function season(systems: typeof tycoonSystems, days = 180) {
+  const session = createSession({ getItem: () => null, setItem: () => {} }, 123, systems, 2, true), { state } = session, ledger = state.world.ledger;
+  for (const from of ['nuel', 'sori', 'aro', 'iri', 'velo', 'lise']) transfer(ledger, { id: `capital:${from}`, from, to: 'player', amount: 300,
+    time: gameTime(state.world.clock), reason: 'Capital transfer' });
+  const lease = session.rentStore('cafe-unit'), shop = session.openShop('tea'), rows: Record<string, number | string>[] = [];
+  const takings = (id: string) => { const b = state.book.businesses.find(b => b.id === id);
+    return b ? Object.values(state.revenueHistory[id] ?? {}).reduce((a, n) => a + n, 0) + paid({ shop: () => b } as never, id).reduce((n, e) => n + e.amount, 0) : 0; };
+  for (let day = 1; day <= days; day++) {
+    for (const st of shop.store.stock) {
+      const q = 6 - st.backroom - st.displayed - lease.orders.filter(o => !o.delivered && o.itemId === st.itemId).reduce((n, o) => n + o.quantity, 0);
+      if (q > 0) session.orderStock(st.itemId === 'soup' ? 'iri' : 'nuel', st.itemId, q);
+    }
+    session.tick(540 / 2); state.player.placeId = 'cafe'; session.tick(180 / 2); state.player.placeId = 'nest'; session.tick(720 / 2);
+    if (day !== 30 && day !== days) continue;
+    const w = session.tycoon.ctx().residents.map(n => ledger.balances[n.id]).sort((x, y) => x - y);
+    rows.push({ day, doren: systems.includes(rival) ? 'O' : 'X', 중앙값: w[w.length >> 1], 빈털터리: w.filter(n => n < 8).length, 주민합: w.reduce((a, n) => a + n, 0),
+      도렌현금: ledger.balances.doren ?? 0, 플레이어매출: takings(shop.id), 도렌매출: takings(DOREN) });
+  }
+  return rows;
+}
+it('C109 7: Doren\'s takings go round — after 180 days no more broke residents than without him (+3), his cash capped', () => {
+  const before = season(tycoonSystems.filter(x => x !== rival)), after = season(tycoonSystems);
+  console.table([...before, ...after]);
+  expect(after[1].빈털터리).toBeLessThanOrEqual(Number(before[1].빈털터리) + 3);
+  expect(after[1].도렌현금).toBeLessThan(600); expect(after[1].중앙값).toBeGreaterThanOrEqual(Number(before[1].중앙값));
+}, 120000);

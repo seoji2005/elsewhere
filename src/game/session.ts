@@ -6,7 +6,6 @@ import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
 import { personas } from '../data/personas';
-import type { Customer } from '../sim/customer';
 import { chooseWeatherNeed, weatherFor, demandWeight } from '../sim/weather';
 import { advanceClock, gameTime, type GameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
@@ -15,8 +14,8 @@ import { restoreWorld } from '../sim/save';
 import { roll as tycoonRoll, settle as tycoonSettle, nextId as tycoonNextId } from '../sim/tycoonCore';
 import { tycoonSystems } from './tycoon/registry';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './tycoon/system';
-import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
-import { applyPersona, decideWithPersona } from '../sim/persona';
+import { patrons, park, personaOf, choice, customerOf, type PatronState } from './tycoon/patrons';
+import { decideWithPersona } from '../sim/persona';
 import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
 import { sign, type CounselState } from './tycoon/counsel';
 import { counterSlots, onDuty, type StaffState } from './tycoon/staff';
@@ -64,12 +63,6 @@ function createEconomy(world: ReturnType<typeof createWorld>) {
     [{ itemId: 'tea', backroom: 300, displayed: 0, capacity: 5, price: 8 }], now);
   hire(book, people, ledger, 'tea-counter', 'iri', jobs[0], now);
   return { purses, book, economyMinute: Math.floor(world.clock.totalMinutes), settledDay: now.day - 1 };
-}
-// Stable daily decisions do not depend on tick size or iteration order.
-function choice(seed: number, key: string): number {
-  let hash = seed;
-  for (const c of key) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619) >>> 0;
-  return hash;
 }
 function addResidents(state: ReturnType<typeof freshState>, allocate = false, open = false) {
   const { world, purses, book } = state, now = gameTime(world.clock);
@@ -779,10 +772,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             }
             const pat = b.ownerId === 'player' && systems.includes(patrons) ? state.tycoon.systems.patrons as PatronState : undefined;
             const persona = pat && personaOf(ctx(), pat, npc.id);
-            let customer: Customer = { likes: npc.likes,
-              priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
-            // Personas shift tolerance only above the reference price: list prices never offend (C087 balance kept).
-            if (persona) customer = { ...applyPersona(customer, persona), priceTolerance: Math.max(1, applyPersona(customer, persona).priceTolerance) };
+            const customer = customerOf(state.npcSeed, npc, persona); // C109: the same customer at Doren's
             const preferred = state.relationMode === 'bonds' && state.populationEconomy;
             let need = preferred ? chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
               choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) : undefined;

@@ -6,6 +6,9 @@ export const rivalSpec = {
   stock: [['tea', 8, 12], ['bread', 10, 8]] as const, // 품목·판매가·첫 재고(원가는 기준가/4, 플레이어와 같은 견적)
   openFrom: 8, openTo: 20, lookAt: [720, 1080], lookChance: 0.8, startDemand: 4, maxOrder: 20, priceDays: 2, queueDays: 1, queueMin: 3,
   cut: 0.85, reviewDays: 3, maxDiscountDays: 21, adCap: 60, adChannels: ['flyer', 'search'], walkHere: 2, walkThere: 4, closeAfter: 3, closeDelay: 2,
+  // C109 돈 순환: 가용액이 cashFloor를 넘는 시간엔 그 자리의 가장 가난한 주민을 한 시간 보조로 쓰고(wage), 마감 뒤 cashCap을 넘는 돈은
+  // 확장 공사 대금으로 가장 가난한 이웃들에게 workPay씩(하루 최대 workers명). 매입은 같은 직업 중 잔액이 가장 적은 생산자에게서.
+  wage: 6, cashFloor: 120, cashCap: 250, workPay: 10, workers: 12,
 } as const;
 export const rivalLines = {
   look: (price: number, queue: number) => `“${price}결. 줄은 ${queue}명이군요.”`,
