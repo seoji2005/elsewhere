@@ -1,5 +1,6 @@
 # Screenshots on a GitHub runner (~5x faster than the server). Push a commit to
-# shots/<name> containing .shots-request (one tools/shot.mjs argument per line);
+# shots/<name> containing .shots-request (one tools/shot.mjs argument per line,
+# including an empty line for a default-screen shot);
 # results are force-pushed to shots-result/<name>. Helper: ~/ops/bin/gha-shots
 name: shots
 on:
@@ -20,7 +21,7 @@ jobs:
       - run: npm run build:single
       - name: Shots
         run: |
-          mapfile -t args < <(grep -v '^\s*$' .shots-request)
+          mapfile -t args < .shots-request
           s=$(date +%s); node tools/shot.mjs "${args[@]}" 2>&1 | tee shot.log; e=$(date +%s)
           echo "seconds: $((e - s))" >> shot.log
       - name: Push results
