@@ -11,6 +11,8 @@ export const skillAt = (base: number, minutes: number) => {
 };
 /** Work units per minute. */
 export const rate = (hand: number) => 60 + hand;
+/** C110: customers the counter takes in an hour — C087's cap for the boss (hand 60), scaled by the hands actually working it. */
+export const counterShare = (capacity: number, hands: readonly number[]) => capacity * hands.reduce((n, h) => n + rate(h), 0) / rate(BOSS_HAND);
 
 /** B7: one task at a time; the longest wait at 70% of patience always means checkout next. */
 export function chooseTask(p: Pick<StaffPolicy, 'taskPriority'>, queue: number, oldestWait: number, emptyShelf: boolean):

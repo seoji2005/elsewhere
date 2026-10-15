@@ -24,4 +24,5 @@ export const reportLines = {
   haggle: (n: number) => `사장님 없는 동안 흥정 손님 ${n}명에게 정한 만큼만 깎아 팔았어요`,
   checkout: (n: number) => `사장님 없는 동안 손님 ${n}명 계산했어요`,
   together: '오늘은 함께 근무했어요', none: '혼자 처리할 주문은 없었어요',
+  notice: (day: number, owed: number) => `${day}일에 그만둔다고 했어요${owed ? ` · 밀린 임금 ${owed}결` : ''}`,
 };

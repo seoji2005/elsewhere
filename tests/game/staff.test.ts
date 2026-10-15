@@ -56,3 +56,70 @@ it('C097 ⑧: split ticks and save/restore give the same staff state and money',
   a.session.saveNow(); const c = createSession({ getItem: k => a.data.get(k) ?? null, setItem: () => {} }, 123);
   expect(c.tycoon.state().systems.staff).toEqual(a.staff());
 });
+// C110 (REVIEW-c097): the work queue sells, minute payroll, supplier totals, request lifecycle, own unpaid wages, bookings.
+import { payWages, type Order } from '../../src/game/tycoon/staff';
+import { dayCashflow, funds } from '../../src/sim/purse';
+const clock = (f: ReturnType<typeof hired>) => f.state.world.clock.totalMinutes;
+const until = (f: ReturnType<typeof hired>, day: number, hm: number) => f.advance((day - 1) * 1440 + hm - clock(f));
+it('C110 ①: on duty, a customer is paid only when a checkout task ends; a 12-hour hand sells more in a day than a new one', () => {
+  const day3 = (hours: number) => {
+    const f = hired(); f.state.player.placeId = 'park'; until(f, 3, 539);
+    f.cmd((_, s) => { s.people[f.id].exp = { hand: hours * 60, eye: hours * 60, speech: 0 }; }); until(f, 3, 600);
+    const line = [...f.staff().queue.map(q => q.ref), ...Object.values(f.staff().people).map(p => p.task?.ref).filter(Boolean)];
+    expect(line.length).toBeGreaterThan(0); expect(f.b.store.visits.filter(v => line.includes(v.id))).toEqual([]); // waiting, not yet paid
+    until(f, 3, 610); expect(f.b.store.visits.some(v => line.includes(v.id) && v.status === 'paid')).toBe(true);
+    until(f, 4, 0); const sold = f.b.store.events.filter(e => e.reason === 'purchased' && e.time.day === 3);
+    expect(sold.every(e => f.staff().outcomes.some(o => e.visitId.startsWith(o.ref)))).toBe(true); // every sale is a finished task
+    return sold.length;
+  };
+  const table = { 신입: day3(0), '숙련 12시간': day3(12) }; console.log('C110 하루 판매 수(3일째, 사장 부재)', table);
+  expect(table['숙련 12시간']).toBeGreaterThan(table.신입);
+});
+it('C110 ②: hire-day minutes are paid with the first payday, late minutes are unpaid, no 09:00 shift pays the same work', () => {
+  const f = hired(), pay = () => f.staff().people[f.id].pay!, paid = () => f.state.world.ledger.transactions.filter(t => t.reason === `Wage: staff:${f.id}`);
+  until(f, 2, 1021); expect([paid().length, pay().min]).toEqual([0, 329]); // hired 11:30, after the shift start: carried
+  until(f, 3, 1021); expect(paid().map(t => t.amount)).toEqual([Math.floor(809 * f.wage / 60)]);
+  expect(f.state.work.shifts.some(s => s.actorId === f.id)).toBe(false);
+  until(f, 4, 539); f.cmd((_, s) => { s.people[f.id].lateUntil = clock(f) + 16; }); until(f, 4, 1021); // 15 minutes late
+  expect(pay().min).toBe(809 + 465); expect(pay().paid).toBe(Math.floor(1274 * f.wage / 60)); expect(paid()).toHaveLength(2);
+});
+it('C110 ③④: one supplier decision is checked on its total; approval re-checks; a request done within a new policy is settled', () => {
+  const f = hired(), shelf = (id: string) => f.b.store.stock.find(s => s.itemId === id)!, open = () => f.staff().requests.filter(r => r.status === 'open' && r.kind === 'order');
+  const bought = () => f.state.world.ledger.transactions.filter(t => t.from === 'player' && /^Procurement: .*:(tea|bread):5:/.test(t.reason)).length;
+  f.cmd((_, s) => setPolicy(s, { orderApprovalLimit: 15 })); f.state.player.placeId = 'park'; until(f, 2, 840);
+  for (const id of ['tea', 'bread']) Object.assign(shelf(id), { backroom: 0, displayed: 0 }); f.advance(1);
+  const [r] = open(); expect([r.lines!.map(l => l.itemId).sort(), r.amount, bought()]).toEqual([['bread', 'tea'], 20, 0]); // 10 each, 20 together
+  shelf('bread').backroom = 5; expect(f.cmd((c, s) => answer(c, s, r.id, true))).toBe(false); // bread came back: new terms shown
+  expect([r.status, r.amount]).toEqual(['open', 10]); expect(f.cmd((c, s) => answer(c, s, r.id, true))).toBe(true); expect(bought()).toBe(1);
+  f.cmd((_, s) => setPolicy(s, { orderApprovalLimit: 0 })); Object.assign(shelf('tea'), { backroom: 0, displayed: 0 }); f.advance(1);
+  const [q] = open(); expect(q.cause).toBe('order:tea');
+  f.cmd((_, s) => setPolicy(s, { orderApprovalLimit: 40 })); f.advance(1); expect([q.status, bought()]).toEqual(['resolved', 2]);
+  expect(f.cmd((c, s) => answer(c, s, q.id, true))).toBe(false); expect(bought()).toBe(2);
+});
+it('C110 ⑤: rent arrears leave a paid staff alone; their own unpaid wage lowers morale, shows on the notice, and paying withdraws it', () => {
+  const f = hired(), p = () => f.staff().people[f.id], start = f.total(), cash = (from: string, to: string, amount: number) => transfer(f.state.world.ledger,
+    { id: `move:${clock(f)}`, from, to, amount, time: gameTime(f.state.world.clock), reason: 'Other spending' });
+  until(f, 3, 1021); const morale = p().morale, all = f.state.world.ledger.balances.player; cash('player', 'sori', all);
+  until(f, 4, 1); expect(f.state.leases[0].warning).toBe('shop.unpaid'); expect(p().morale).toBe(morale + 1);
+  until(f, 4, 1019); const sales = f.state.world.ledger.balances.player; cash('player', 'sori', sales); // broke at payday
+  until(f, 5, 1); expect(p().pay!.owed).toBeGreaterThan(0); expect(p().morale).toBe(morale - 4);
+  f.cmd((_, s) => { s.people[f.id].notice = 7; }); expect(report(f.staff(), 5).text).toContain(`밀린 임금 ${p().pay!.owed}결`);
+  cash('sori', 'player', all + sales); expect(f.cmd((c, s) => payWages(c, s, f.id))).toBe(true);
+  expect([p().pay!.owed, p().notice]).toEqual([0, null]); expect(report(f.staff(), 5).text).not.toContain('그만둔다'); expect(f.total()).toBe(start);
+});
+it('C110 ⑥: a booked basket is never sold to others and comes first at its time; fewer goods than booked asks the boss', () => {
+  const run = (priority: 'arrival' | 'appointment', goods: number, count = 4) => {
+    const f = hired(); f.state.player.placeId = 'park'; until(f, 2, 691);
+    const ctx = f.session.tycoon.ctx(), [a, b] = ctx.residents.filter(n => !f.state.book.employment.some(e => e.actorId === n.id) &&
+      funds(ctx.world.ledger, ctx.purses[n.id]).spendable >= 40 && dayCashflow(ctx.world.ledger, ctx.purses[n.id], 2).consumption === 0).map(n => n.id);
+    Object.assign(f.b.store.stock.find(s => s.itemId === 'tea')!, { displayed: Math.min(3, goods), backroom: Math.max(0, goods - 3) });
+    const order = (ref: string, npcId: string, n: number): Order => ({ kind: 'checkout', ref, itemId: 'tea', minute: clock(f), npcId, maxPrice: 8, count: n });
+    f.cmd((_, s) => { setPolicy(s, { reservationPriority: priority }); s.queue.push(order('walk-in', a, 1), order('booked', b, count)); }); f.advance(9);
+    return { f, paid: f.b.store.visits.filter(v => v.status === 'paid' && ['walk-in', 'booked'].includes(v.id.split(':')[0])).map(v => v.id) };
+  };
+  expect(run('arrival', 4).paid).toEqual(['booked', 'booked:1', 'booked:2', 'booked:3']); // the walk-in came first but the 4 are booked
+  expect(run('appointment', 8).paid.slice(0, 2)).toEqual(['booked', 'booked:1']);
+  const { f } = run('appointment', 2), ask = f.staff().requests.find(r => r.kind === 'booking')!;
+  expect([ask.status, ask.qty]).toEqual(['open', 2]); expect(f.cmd((c, s) => answer(c, s, ask.id, true))).toBe(true);
+  expect(f.b.store.visits.filter(v => v.status === 'paid' && v.id.startsWith('booked')).length).toBe(2);
+});
