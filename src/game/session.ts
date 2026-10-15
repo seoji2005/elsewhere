@@ -1,4 +1,4 @@
-import { storefronts, shopKinds, shopStock, type ShopKind } from '../data/storefronts';
+import { storefronts, retailDemand, shopKinds, shopStock, type ShopKind } from '../data/storefronts';
 import { rentStorefront, endLease, jobOffer, type Lease } from '../sim/business';
 import { npcs } from '../data/npcs';
 import { companionEvents } from '../data/companions';
@@ -88,7 +88,10 @@ function addResidents(state: ReturnType<typeof freshState>, allocate = false, op
 function supplyDay(state: ReturnType<typeof freshState>, residents: ReturnType<typeof addResidents>) {
   const { world, book } = state, time = gameTime(world.clock);
   for (const b of book.businesses) if (b.closedAt === null && b.ownerId !== 'player') for (const stock of b.store.stock) {
-    const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
+    let producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
+    if (state.leases.some(l => !l.ended && l.businessId)) producer = residents
+      .filter(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId])
+      .reduce<typeof residents[number] | undefined>((best, n) => !best || world.ledger.balances[n.id] < world.ledger.balances[best.id] ? n : best, undefined);
     if (!producer) continue;
     for (let batch = 0; stock.backroom + stock.displayed < 10 && batch < 2; batch++) {
       const unitCost = Math.max(1, Math.floor(stock.price / 4)), id = `daily-supply:${b.id}:${stock.itemId}:${time.day}:${batch}`;
@@ -388,8 +391,22 @@ export function createSession(storage: Storage, npcSeed?: number) {
   };
   function staffPlace(npc: typeof residents[number], now: ReturnType<typeof gameTime>) {
     const e = state.book.employment.find(e => e.actorId === npc.id && e.leftAt === null && e.job.employerId === 'player');
-    return e && now.hour * 60 + now.minute >= e.job.fromMinute && now.hour * 60 + now.minute < e.job.toMinute
-      ? e.job.placeId : whereIs(npc, now);
+    if (e && now.hour * 60 + now.minute >= e.job.fromMinute && now.hour * 60 + now.minute < e.job.toMinute) return e.job.placeId;
+    // One shopping stop during today's outing; actual NPC placement and purchases share this route.
+    // Existing NPC-only saves keep their schedules until a new storefront opens.
+    if (state.leases.some(l => !l.ended && l.businessId)) {
+      const slots = npc.schedule[(now.day - 1) % 7], homes = ['nest', 'quiet', 'high'];
+      const outing = slots.find((s, i) => !homes.includes(s.placeId) && s.fromMinute < 1020 &&
+        (slots[i + 1]?.fromMinute ?? 1440) > 540);
+      const first = Math.max(9, Math.ceil((outing?.fromMinute ?? 1440) / 60));
+      const last = Math.min(17, Math.ceil((slots.find(s => s.fromMinute > (outing?.fromMinute ?? 1440) && homes.includes(s.placeId))?.fromMinute ?? 1020) / 60));
+      if (last > first && now.hour === first + choice(state.npcSeed, `trip:${now.day}:${npc.id}`) % (last - first) &&
+          !state.work.shifts.some(s => s.actorId === npc.id && s.startedAt <= minuteOf(now) && s.endsAt > minuteOf(now))) {
+        const shops = [...new Set(storefronts.filter(unit => state.book.businesses.some(b => b.closedAt === null && b.placeId === unit.placeId)).map(unit => unit.placeId))];
+        return shops[choice(state.npcSeed, `stop:${now.day}:${npc.id}`) % shops.length];
+      }
+    }
+    return whereIs(npc, now);
   };
   const settleShops = (day: number) => {
     const now = { day, hour: 23, minute: 59 }, { world, book } = state;
@@ -649,6 +666,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       }
       payWages();
       if (minute % 60 === 0) {
+        const retail = state.leases.some(l => !l.ended && l.businessId);
         const byPlace = new Map<string, typeof residents>();
         for (const npc of residents) {
           const place = staffPlace(npc, now), present = byPlace.get(place) ?? [];
@@ -665,23 +683,34 @@ export function createSession(storage: Storage, npcSeed?: number) {
                 !state.work.shifts.some(s => s.actorId === npc.id && (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
               startEmployeeShift(book, state.work, npc.id, b.placeId, now);
             if (npc.id === b.ownerId) continue;
-            if (b.ownerId === 'player' && (employment || !book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
+            if (b.ownerId === 'player' && (employment || state.player.placeId !== b.placeId && !book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
                 state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute)))) continue;
-            const visitId = `${b.id}:${now.day}:${npc.id}`;
+            const visitId = `${b.id}:${now.day}:${npc.id}${retail && b.ownerId !== 'player' ? `:${Math.floor(now.hour / 8)}` : ''}`;
+            if (b.store.visits.some(v => v.id === visitId)) continue;
+            if (b.ownerId === 'player') {
+              // Opening deliveries precede trading; each counter serves one customer per hourly step.
+              const orders = state.leases.find(l => l.businessId === b.id)!.orders;
+              if (orders.length && orders.every(o => !o.delivered)) continue;
+              if (b.store.events.filter(e => e.reason === 'purchased' && e.time.day === now.day && e.time.hour === now.hour).length >= b.capacity) continue;
+            }
             const customer: Customer = { likes: npc.likes,
               priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
             const preferred = state.relationMode === 'bonds' && state.populationEconomy;
-            const need = preferred ? chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
+            let need = preferred ? chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id)),
               choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) : undefined;
+            const cash = b.ownerId === 'player' ? funds(world.ledger, purses[npc.id]).spendable : 0;
+            const wanted = b.ownerId === 'player' ? b.store.stock.find(s => s.itemId === need?.itemId) : undefined;
+            if (b.ownerId === 'player' && need && wanted && wanted.price > cash && wanted.price <= need.maxPrice)
+              need = chooseWeatherNeed(customer, items.filter(item => b.store.stock.some(s => s.itemId === item.id && s.price <= cash)),
+                choice(state.npcSeed, `need:${visitId}`) / 0x100000000, now.day, weatherFor(state.npcSeed, now.day)) ?? need;
             const stock = preferred ? b.store.stock.find(s => s.itemId === need?.itemId) : b.store.stock[0];
-            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= 45 + 15 * demandWeight(stock.itemId, now.day) ||
-                b.store.visits.some(v => v.id === visitId)) continue;
+            if (!stock || state.populationEconomy && choice(state.npcSeed, visitId) % 100 >= (retail ? retailDemand.visitChance : 45) + 15 * demandWeight(stock.itemId, now.day)) continue;
             if (need && stock.price > need.maxPrice) {
               visitStore(b.store, world.ledger, visitId, npc.id, need, customer.patienceMinutes, now);
               continue;
             }
             if (funds(world.ledger, purses[npc.id]).spendable < stock.price ||
-                dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
+                dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > (retail ? retailDemand.dailyBudget : 32)) continue;
             if (b.ownerId !== 'player' && stock.backroom + stock.displayed === 0) {
               const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
               if (producer && stock.itemId === 'lamp') {
@@ -723,7 +752,22 @@ export function createSession(storage: Storage, npcSeed?: number) {
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
         settleShops(now.day - 1);
         advanceDay(state.market); state.settledDay = now.day - 1;
-        if (state.populationEconomy) supplyDay(state, residents);
+        if (state.populationEconomy) {
+          // Cash-funded production bonuses circulate surplus to poorer workers; contracts and arrears stay intact.
+          if (book.businesses.some(b => b.ownerId === 'player' && b.closedAt === null)) for (const npc of [...residents].sort((a, b) =>
+              world.ledger.balances[a.id] - world.ledger.balances[b.id])) {
+            if (book.employment.some(e => e.actorId === npc.id && e.leftAt === null)) continue;
+            const employer = book.businesses.find(b => b.ownerId !== 'player' && b.closedAt === null && b.ownerId !== npc.id &&
+              b.store.stock.some(s => businessProducerJobs[s.itemId] === npc.job));
+            const slots = npc.schedule[(now.day - 2) % 7];
+            if (!employer || !slots.some((s, i) => s.placeId === employer.placeId &&
+                (slots[i + 1]?.fromMinute ?? 1440) - s.fromMinute >= 480)) continue;
+            if (world.ledger.balances[employer.ownerId] < retailDemand.employerReserve + retailDemand.productionBonus) continue;
+            payPerson(world.people, world.ledger, { id: `production:${now.day - 1}:${npc.id}`, from: employer.ownerId,
+              to: npc.id, amount: retailDemand.productionBonus, time: { day: now.day - 1, hour: 23, minute: 59 }, reason: `Wage: production-bonus:${employer.id}` });
+          }
+          supplyDay(state, residents);
+        }
         const cutoff = minute - 14 * 1440;
         const beforeDay = now.day - 14;
         compactLedger(world.ledger, beforeDay);
