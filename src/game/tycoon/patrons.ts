@@ -4,13 +4,15 @@ import { assignPersona, bark, parkingEffect, promotePersona } from '../../sim/pe
 import { restock, setPrice, visitStore } from '../../sim/store';
 import { checkoutBusiness } from '../../sim/business';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './system';
+import { closure, onSite, partnerSpaces, type CityState } from '../../sim/cityEvents';
+import { partnerLot } from '../../data/cityEvents';
 
 export interface PatronLine { minute: number; npcId: string; name: string; personaId: PersonaId; situation: Situation; text: string }
 /** offer: the haggler's price (their maxPrice, within 10% under the list price). */
 export interface Haggle { visitId: string; npcId: string; businessId: string; itemId: string; offer: number; minute: number }
 export interface PatronState {
   personas: Record<string, PersonaId>; visits: Record<string, number>;
-  parking: number[]; haggles: Haggle[]; feed: PatronLine[];
+  parking: number[]; haggles: Haggle[]; feed: PatronLine[]; lot?: number[];
 }
 export const parkingSpaces = 2, haggleMinutes = 60;
 const minuteOf = (ctx: TycoonCtx) => (ctx.time.day - 1) * 1440 + ctx.time.hour * 60 + ctx.time.minute;
@@ -23,14 +25,20 @@ export function personaOf(ctx: TycoonCtx, s: PatronState, npcId: string): Person
 // Big spenders and parking hogs always drive; half of the busy office workers do.
 const drives = (ctx: TycoonCtx, id: PersonaId, npcId: string) =>
   id === 'bigSpender' || id === 'parkingHog' || id === 'rusher' && ctx.roll('patrons', `car:${npcId}`, 0) < 0.5;
-/** False when this visitor drives and both spaces are taken; a hog then holds one space for 20 minutes. */
+/**
+ * False when this visitor drives and no space is free; a hog then holds one space for 20 minutes.
+ * C100: during roadworks the street spaces are closed (base count untouched); a parking partnership offers its lot,
+ * where every car is held for the round-trip walk.
+ */
 export function park(ctx: TycoonCtx, s: PatronState, npcId: string, id: PersonaId): boolean {
-  if (!drives(ctx, id, npcId)) return true;
-  const now = minuteOf(ctx);
-  s.parking = s.parking.filter(until => until > now);
-  if (s.parking.length >= parkingSpaces) return false;
-  const { occupiedUntil } = parkingEffect(id, now, now, parkingSpaces);
-  if (occupiedUntil > now) s.parking.push(occupiedUntil);
+  const now = minuteOf(ctx), city = ctx.systems.cityEvents as CityState | undefined, closed = !!closure(city, now);
+  if (!drives(ctx, id, npcId) || onSite(city, npcId, now)) return true; // a roadworks crew walks over from the site
+  const spaces = closed ? partnerSpaces(city, now) : parkingSpaces;
+  const held = (closed ? s.lot ?? [] : s.parking).filter(until => until > now);
+  if (closed) s.lot = held; else s.parking = held;
+  if (held.length >= spaces) return false;
+  const occupiedUntil = Math.max(parkingEffect(id, now, now, spaces).occupiedUntil, closed ? now + 2 * partnerLot.walk : 0);
+  if (occupiedUntil > now) held.push(occupiedUntil);
   return true;
 }
 function say(ctx: TycoonCtx, s: PatronState, npcId: string, situation: Situation) {
@@ -68,6 +76,7 @@ export const patrons: TycoonSystem<PatronState> = {
     const s = raw as PatronState, ids = Object.keys(personas), natural = (n: unknown) => Number.isSafeInteger(n) && (n as number) >= 0;
     if (!s || typeof s !== 'object' || !Object.values(s.personas ?? 0).every(id => ids.includes(id)) ||
         !Object.values(s.visits ?? 0).every(natural) || !Array.isArray(s.parking) || !s.parking.every(natural) ||
+        s.lot !== undefined && (!Array.isArray(s.lot) || !s.lot.every(natural)) ||
         !Array.isArray(s.haggles) || !s.haggles.every(h => natural(h?.offer) && natural(h.minute)) ||
         !Array.isArray(s.feed) || !s.feed.every(l => situations.includes(l?.situation) && typeof l.text === 'string'))
       throw Error('Invalid patrons');

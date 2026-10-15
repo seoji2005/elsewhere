@@ -19,7 +19,10 @@ import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
 import { applyPersona, decideWithPersona } from '../sim/persona';
 import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
 import { sign, type CounselState } from './tycoon/counsel';
-import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
+import { emptyTycoon, createTycoon, restoreTycoon, runBeforeMinute, runMinute, runDay, type TycoonState } from './tycoon/state';
+import { cityEvents } from './tycoon/cityEvents';
+import { onSite, type CityState } from '../sim/cityEvents';
+import { roadworks } from '../data/cityEvents';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
@@ -193,7 +196,7 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
 // deliveryFees (C096): only a brand-new game charges delivery; seeded test sessions and older saves keep C087's numbers.
 export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems,
   newGameSpeed = 1, deliveryFees = npcSeed === undefined) {
-  let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null, tycoonReady = false;
+  let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null, tycoonReady = false, fresh = false;
   const ctxFor = (t: TycoonState, people: readonly Npc[], time = gameTime(state.world.clock)): TycoonCtx => ({
     world: state.world, book: state.book, leases: state.leases, purses: state.purses, residents: people,
     npcSeed: state.npcSeed, player: state.player, time, systems: t.systems,
@@ -211,7 +214,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   };
   try {
     const raw = storage.getItem(SESSION_KEY);
-    if (raw === null) seed();
+    if (raw === null) { seed(); fresh = true; }
     else {
       try {
         const parsed = JSON.parse(raw);
@@ -331,12 +334,14 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
         if (state.world.clock.totalMinutes < 0 || state.world.clock.minutesPerSecond < 0 ||
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
         state.tycoon = restoreTycoon(state.tycoon, systems, t => ctxFor(t, loaded)); tycoonReady = true;
-      } catch (error) { tycoonReady = false; state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); damaged = raw; loadResult = { ok: false, error }; backup(); }
+      } catch (error) { tycoonReady = false; state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); fresh = true; damaged = raw; loadResult = { ok: false, error }; backup(); }
     }
-  } catch (error) { if (state === unseeded) seed(); loadResult = { ok: false, error }; }
+  } catch (error) { if (state === unseeded) { seed(); fresh = true; } loadResult = { ok: false, error }; }
   const residents = addResidents(state);
   const ctx = (t = state.tycoon, time?: GameTime) => ctxFor(t, residents, time);
   if (!tycoonReady) { state.tycoon = createTycoon(systems, ctx); state.world.clock.minutesPerSecond = newGameSpeed; } // saves keep their speed
+  // C100: only a brand-new world gets the city's starting ledger (never an existing save), on its first minute.
+  if (fresh && deliveryFees && systems.includes(cityEvents)) (state.tycoon.systems.cityEvents as CityState).prepare = true;
   // C095 demand hooks, player's shop only (see TycoonSystem.visitBonus / onShopEvent).
   const visitBonus = (v: { npcId: string; businessId: string; hour: number }) =>
     Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
@@ -428,6 +433,11 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     shopReport() { return state.leases.map(l => ({ leaseId: l.id, warning: l.warning, arrears: l.arrears, reports: l.reports })); },
   };
   function staffPlace(npc: typeof residents[number], now: ReturnType<typeof gameTime>) {
+    // C100: roadworks crews eat near the site 09:00–10:00, in front of the player's shop when it is on the road.
+    if (onSite(state.tycoon?.systems.cityEvents as CityState | undefined, npc.id, minuteOf(now))) {
+      const shop = state.book.businesses.find(b => b.ownerId === 'player' && b.closedAt === null);
+      return shop && (roadworks.placeIds as readonly string[]).includes(shop.placeId) ? shop.placeId : roadworks.placeIds[1];
+    }
     const e = state.book.employment.find(e => e.actorId === npc.id && e.leftAt === null && e.job.employerId === 'player');
     if (e && now.hour * 60 + now.minute >= e.job.fromMinute && now.hour * 60 + now.minute < e.job.toMinute) return e.job.placeId;
     // One shopping stop during today's outing; actual NPC placement and purchases share this route.
@@ -706,6 +716,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
         stock.backroom += order.quantity; order.delivered = true;
       }
       payWages();
+      runBeforeMinute(state.tycoon, systems, ctx, minute); // C100: roadworks start/end precede this minute's visitors
       if (minute % 60 === 0) {
         const retail = state.leases.some(l => !l.ended && l.businessId);
         const byPlace = new Map<string, typeof residents>();
