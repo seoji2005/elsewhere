@@ -1,0 +1,31 @@
+# Image generation on a GitHub runner with the Gemini API. The key lives only in the
+# repository secret GEMINI_API_KEY (never on the server). Push a commit to gen/<name>
+# containing .gen-request.json; images are force-pushed to gen-result/<name>.
+# Helper: ~/ops/bin/gha-gen
+name: gen-images
+on:
+  push:
+    branches: ['gen/**']
+permissions:
+  contents: write
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Generate
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node tools/gen/gemini.mjs .gen-request.json out 2>&1 | tee gen.log
+      - name: Push results
+        if: always()
+        run: |
+          name=${GITHUB_REF_NAME#gen/}
+          mkdir -p out && cp gen.log out/ || true
+          cd out && git init -q && git checkout -q -b r
+          git config user.name gen-bot; git config user.email gen-bot@users.noreply.github.com
+          git add -A && git commit -qm "images for $name"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" "r:gen-result/$name"
