@@ -168,3 +168,14 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 .hud-body details summary { min-height: 32px; line-height: 32px; }
 .hud-now { position: sticky; bottom: 0; margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: #2c3a55; color: #e8eefc; font-weight: 700; }
 .hud-verdict { margin: 6px 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.build-tag {
+  position: fixed; right: calc(env(safe-area-inset-right) + 6px); bottom: calc(env(safe-area-inset-bottom) + 2px);
+  color: rgba(255, 255, 255, 0.7); font: 600 10px system-ui, sans-serif; text-shadow: 0 1px 2px #000; pointer-events: none;
+}
+.intro { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(10, 12, 18, 0.55); }
+.intro-card {
+  max-width: min(520px, 92vw); max-height: 92vh; overflow-y: auto; padding: 14px 20px; border-radius: 14px;
+  background: rgba(20, 24, 32, 0.92); color: #eef0f4; font: 15px/1.45 system-ui, sans-serif; text-align: center;
+}
+.intro-card p { margin: 0 0 6px; }
+.intro-card .hud-open { min-width: 160px; height: 46px; margin-top: 8px; }

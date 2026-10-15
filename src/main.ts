@@ -30,6 +30,8 @@ import { doors as cornerDoors, townDoors } from './data/doors';
 import { generate } from './sim/npcgen';
 import { whereIs } from './sim/npc';
 import { lifeSpots, sidewalk } from './scene/spots';
+import { prepareTrial, trial, trialStorage } from './data/tycoonScenario';
+import { buildTag, intro } from './ui/intro';
 
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk|night) or style=current (the look A/B corner as before).
@@ -86,7 +88,11 @@ if (blob) {
   scene.add(blob);
 }
 // The life simulation: clock, wallets, residents, shops and market; autosaves every game hour and when hidden.
-const session = createSession(localStorageAdapter(), undefined, undefined, NEW_GAME_SPEED);
+// ?trial=1 (C106): a separate save (trial.*) on seed 106, prepared at 07:00 with the shop signed and opened.
+const trialMode = query.get('trial') === '1';
+const session = trialMode ? createSession(trialStorage(localStorageAdapter()), trial.seed, undefined, NEW_GAME_SPEED, true)
+  : createSession(localStorageAdapter(), undefined, undefined, NEW_GAME_SPEED);
+const fresh = trialMode && prepareTrial(session);
 const player = session.state.player;
 character.group.position.set(player.x, 0, player.z);
 character.group.rotation.y = player.direction;
@@ -114,6 +120,9 @@ const ui = hud(session, residents, {
   },
 });
 if (!session.loadResult.ok) ui.say('저장이 손상돼 새로 시작했어요');
+if (fresh) ui.open('', 'shop'); // the new trial starts at the shop's door
+buildTag();
+const guide = fresh ? intro() : undefined;
 addEventListener('visibilitychange', () => { if (document.hidden) { syncPosition(); session.saveNow(); } });
 const [phoneTab, phonePlace] = (query.get('phone') ?? '').split(',');
 if (phoneTab) ui.open(phoneTab, phonePlace);
@@ -259,7 +268,7 @@ renderer.setAnimationLoop(now => {
   ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
   positionElapsed += dt;
   if (positionElapsed >= 0.2) { syncPosition(); positionElapsed = 0; }
-  const reading = talk.active() || ui.reading(); // GDD §2: no time pressure while reading
+  const reading = talk.active() || ui.reading() || !!guide?.open(); // GDD §2: no time pressure while reading
   ui.paused(reading);
   if (session.tick(reading ? 0 : Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
   cast.forEach(person => person.update(0, Math.min(dt, 0.1)));
