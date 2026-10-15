@@ -20,7 +20,7 @@
 - 그래픽: 툰 fable A(사용자 선택) + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선, 그늘 곱 1회). 캐릭터 기본 6.5~7등신(VRoid 원비율, 사용자). 기준 장면 후보 docs/look/golden-candidate-c065.png(spot=C dusk).
 - 문서: docs/look/STYLE.md(아트 바이블; 참고 5장은 예시일 뿐 고정 아님 — 사용자), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
 **사용자 결정(오늘)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감이 목표. 기능 제안 8개 승인. 과금은 Gemini 이미지 API만(키는 저장소 비밀값 GEMINI_API_KEY, ~/ops/bin/gha-gen으로 GitHub Actions 생성 → 갤러리).
-**대기 중**: 이미지 2차(같은 장면 12화풍, https://3-34-132-123.sslip.io/gen/batch2-154742/) 사용자 선택 → 그 화풍으로 소품·건물·캐릭터 시트 생성 → Blender로 제작.
+**대기 중**: 과슈풍 vs 툰 선택(C069, https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1, 브랜치 cl/c069). 그 전 단계: 이미지 2차(같은 장면 12화풍, https://3-34-132-123.sslip.io/gen/batch2-154742/) 사용자 선택 → 그 화풍으로 소품·건물·캐릭터 시트 생성 → Blender로 제작.
 **다음 할 일**
 1. 화풍 선택 반영(STYLE.md 갱신) → 소품·건물 시트 3차 생성.
 2. 뉴욕풍 블록 실제 제작(C067): Building Tools(설치됨) + 변환기(tools/normalize.mjs, C066) + STYLE §5 상자 금지 4요소·영어 가상 간판·군중·3단 스카이라인. 장소 A~E를 진짜 장소로.
