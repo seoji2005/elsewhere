@@ -68,15 +68,19 @@ const archetypeLines: Record<string, [string, string]> = {
   wit: ['고요한 날에도 농담은 남겠네요.', '고요한 날에도 농담은 남겠네.'],
   inventor: ['새로운 수선 방법을 해볼까요?', '새로운 수선 방법을 해보자.'],
 };
-export function dialogueFor(npc: Npc, value = 0, actorId = 'player'): DialogueTemplate {
-  if (dialogueTemplates[npc.id]) return dialogueTemplates[npc.id];
+export function dialogueFor(npc: Npc, value = 0, actorId = 'player', informal?: boolean): DialogueTemplate {
+  const authored = dialogueTemplates[npc.id];
+  if (authored && (informal === undefined || (npc.id === 'lise' ? informal : !informal))) return authored;
   const generated = npc as Partial<GeneratedNpc>;
   const archetype = archetypes.find(a => a.id === generated.archetypeId)
     ?? archetypes.find(a => a.traits.every((trait, i) => trait === npc.traits[i])) ?? archetypes[0];
-  const speech = generated.speech ?? archetype.speech, informal = value >= speech.informalAt;
+  const speech = generated.speech ?? archetype.speech;
+  const privateSpeech = informal === true;
+  informal = informal !== false && value >= speech.informalAt;
   const address = (informal ? speech.informalAddress : speech.politeAddress).replace('{name}', actorId === 'player' ? '플레이어' : actorId);
   const [polite, casual] = archetypeLines[archetype.id], line = `${address}, ${informal ? casual : polite}`;
-  return { greeting: line, familiar: line, chat: line, repeat: informal ? '그 얘기는 아까 했지.' : '그 얘기는 아까 했어요.',
+  return { greeting: !informal && authored ? authored.greeting : line,
+    familiar: privateSpeech && informal ? `${line} 너와 있으니 마음이 놓여.` : line, chat: line, repeat: informal ? '그 얘기는 아까 했지.' : '그 얘기는 아까 했어요.',
     gift: informal ? '마음 써 줘서 고마워.' : '마음 써 줘서 고마워요.', dislikedGift: informal ? '마음만 받을게.' : '마음만 받을게요.',
     accept: informal ? '좋아. 함께 시간을 보내자.' : '좋아요. 함께 시간을 보내요.', refuse: informal ? '아직은 준비가 안 됐어.' : '아직은 준비가 안 됐어요.' };
 }

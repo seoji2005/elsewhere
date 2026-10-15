@@ -48,6 +48,12 @@
   현재 경향(2026-10-15, 표본 30): 로직 카드는 Codex sol medium(n=5, 품질 4.6·첫 통과 80%·7.7만 토큰)이 high(n=9, 4.3·67%·6.5만)와 같거나 낫다 → 로직 기본을 medium으로 가산, high는 여러 파일 원인 찾기·큰 카드. 리서치 REA는 astra high(n=5, 5.0) 유지. 나머지 조합은 표본 부족.
 - Claude 작업자도 저장소 코드는 dev로만 실행하고(`sudo -u dev`), 카드·자동 검사·범위 규칙은 같다.
 
+## 클라우드 작업자 (사용자 제안 2026-10-15, 시험 통과)
+서버(2코어·3.8GB, CPU 크레딧 소진 시 steal 50%+)는 테스트·브라우저·여러 작업 동시 실행에 약하다. 무거운 일은 클라우드로:
+- Claude: 작업 브랜치를 푸시 → `create_session`(Anthropic 클라우드 환경 "기본값" env_013iLZDmoevVok3tR7qodZeF, source_url github.com/seoji2005/elsewhere, source_revision 브랜치, outcome_branch 같은 브랜치) → 끝나면 `list_events`(result)로 보고 읽기 → 서버에서 fetch·검수·합침. 클라우드는 4코어·16GB, check.sh 전체 24초(서버 10분+), Chromium 동작, Blender 없음(tests/tools/normalize만 환경 실패로 본다).
+- Codex: Codex 클라우드 환경(elsewhere)이 생기면 `codex cloud exec --env <ID>` → `codex cloud diff/apply`. 그전까지는 서버 Codex(브라우저 검증은 마스터·클라우드).
+- 서버에 남기는 것: 카드·검수·합침·푸시, 체험판 게시, Blender 렌더(한 번에 하나).
+
 ## 마스터 운영
 - 진행 중인 작업은 `~/ops/board-tasks.md`(ubuntu 홈, ~/.claude 안에 셸로 쓰면 권한 창이 뜬다)에 한 줄씩 적고 끝나면 지운다(사용자가 `/board`로 본다).
 - 카드와 diff만 읽는다. 전체 코드를 다시 훑지 않는다. 전체 확인은 자동 검사가 한다.

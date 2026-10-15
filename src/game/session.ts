@@ -309,7 +309,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
   const context = (npcId: string) => {
     const npc = residents.find(n => n.id === npcId);
     if (!npc) throw Error('Unknown resident');
-    return { actorId: 'player', npc, time: gameTime(state.world.clock), value: state.world.relationships.player?.[npcId] ?? 0 };
+    const time = gameTime(state.world.clock), placeId = whereIs(npc, time);
+    const atWork = Object.entries({ office: ['빛씨 조율사', '빛고리 조율실 수석 조율사', '밤결 기록사'],
+      cafe: ['잔향 차 배합사'], shop: ['공유물 순환지기'], park: ['떠오름 뜰 돌봄사'] })
+      .some(([place, jobs]) => place === placeId && jobs.includes(npc.job));
+    return { actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
+      scene: { placeId, atWork, peopleCount: residents.filter(n => whereIs(n, time) === placeId).length
+        + Number(state.player.placeId === placeId),
+      bond: state.relationMode === 'bonds' ? readBond(state.bonds, npcId, 'player') : undefined } };
   };
   const publish = (id: string, npcId: string, topic: string, kind: SocialEvent['kind']) => {
     seedAcquaintances();
@@ -389,7 +396,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       if (!id || state.dialogue.memories[npcId]?.entries.some(m => m.id === id)) throw Error('Invalid or duplicate gift event');
       const ctx = context(npcId), entry = giveGift(state.shop, state.world, state.relationships, 'player', ctx.npc, itemId, ctx.time);
-      const line = recordDialogue(state.dialogue, id, ctx.npc, entry);
+      const line = recordDialogue(state.dialogue, id, ctx.npc, entry, ctx);
       if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, entry.time, [reactionEffect(entry)]);
       publish(id, npcId, entry.choice.topic, entry.change < 0 ? 'hurt' : 'help'); return { entry, line };
     },

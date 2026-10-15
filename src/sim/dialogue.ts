@@ -4,6 +4,7 @@ import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
 import { interact, relationshipStage, type DialogueChoice, type RelationshipState,
   type Interaction } from './relationship';
+import { friendly, type Bond } from './bonds';
 import type { WorldState } from './world';
 
 export interface Consent { playerWantsDating: boolean; npcWantsDating: boolean }
@@ -13,6 +14,12 @@ export interface DialogueState {
 }
 export interface DialogueContext {
   actorId: string; npc: Npc; time: GameTime; value: number;
+  scene?: { placeId: string; peopleCount: number; atWork: boolean; bond?: Bond };
+}
+function informalFor(ctx: DialogueContext): boolean | undefined {
+  const scene = ctx.scene;
+  return scene ? !scene.atWork && scene.peopleCount === 2
+    && (scene.bond ? friendly(scene.bond) : ctx.value >= 30) : undefined;
 }
 export function createDialogueState(): DialogueState { return { memories: {}, dating: [] }; }
 function validate(ctx: DialogueContext): void {
@@ -27,8 +34,8 @@ export function isDating(state: DialogueState, actorId: string, npcId: string): 
 }
 export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
-  const template = dialogueFor(ctx.npc, ctx.value, ctx.actorId);
-  const memories = state.memories[ctx.npc.id];
+  const template = dialogueFor(ctx.npc, ctx.scene?.bond?.affection ?? ctx.value, ctx.actorId, informalFor(ctx));
+  const memories = informalFor(ctx) === false ? undefined : state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
   const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
@@ -37,7 +44,7 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   const past = !shared && memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'gift' || memory.kind === 'chat') && memory.mentionedAt === undefined
     && now - memory.created >= 1440) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
-  const familiar = ctx.value >= 30;
+  const familiar = informalFor(ctx) ?? ctx.value >= 30;
   let sharedLine: string | undefined;
   if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
     const style = ctx.npc.id === 'lise' && familiar ? 'lise' : ctx.npc.traits.includes('practical')
@@ -61,7 +68,7 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
 }
 // Existing gift callers pass giveGift()'s result here; never grant score twice.
 export function recordDialogue(state: DialogueState, eventId: string, npc: Npc,
-  entry: Interaction): string {
+  entry: Interaction, ctx?: DialogueContext): string {
   if (entry.npcId !== npc.id) throw Error('NPC mismatch');
   const memories = state.memories[npc.id] ?? createMemoryState(npc.id);
   const now = minuteOf(entry.time);
@@ -70,7 +77,7 @@ export function recordDialogue(state: DialogueState, eventId: string, npc: Npc,
     && now - memory.created < 14 * 1440);
   remember(memories, eventId, entry);
   state.memories[npc.id] = memories;
-  const template = dialogueFor(npc, entry.value, entry.actorId);
+  const template = dialogueFor(npc, ctx?.scene?.bond?.affection ?? entry.value, entry.actorId, ctx && informalFor(ctx));
   if (entry.choice.id.startsWith('gift:')) {
     return npc.dislikes.includes(entry.choice.topic) ? template.dislikedGift : template.gift;
   }
@@ -83,7 +90,7 @@ export function talk(world: Pick<WorldState, 'relationships'>, relationships: Re
     throw Error('Invalid or duplicate dialogue event');
   }
   const entry = interact(world, relationships, ctx.actorId, ctx.npc, ctx.time, choice);
-  return { entry, line: recordDialogue(state, eventId, ctx.npc, entry) };
+  return { entry, line: recordDialogue(state, eventId, ctx.npc, entry, ctx) };
 }
 export function confess(state: DialogueState, ctx: DialogueContext, consent: Consent) {
   validate(ctx);
@@ -92,6 +99,6 @@ export function confess(state: DialogueState, ctx: DialogueContext, consent: Con
   if (accepted && !isDating(state, ctx.actorId, ctx.npc.id)) {
     state.dating.push({ actorId: ctx.actorId, npcId: ctx.npc.id });
   }
-  const template = dialogueFor(ctx.npc, ctx.value, ctx.actorId);
+  const template = dialogueFor(ctx.npc, ctx.scene?.bond?.affection ?? ctx.value, ctx.actorId, informalFor(ctx));
   return { accepted, line: accepted ? template.accept : template.refuse };
 }
