@@ -21,6 +21,10 @@ import { answerHaggle, type PatronState } from '../game/tycoon/patrons';
 import { shows } from '../data/shows';
 import { npcs } from '../data/npcs';
 import { leisure } from '../game/tycoon/leisure';
+import { crowdOf, guessUsual, type SceneState } from '../game/tycoon/scene';
+import { crowdLevels, sceneLines } from '../data/shopScene';
+import { personas } from '../data/personas';
+import { ding, isMuted, setMuted } from './sound';
 
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
@@ -339,22 +343,51 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       line.onclick = () => act(() => { selected = n.id; });
     }
   }
-  // C095: inside the player's own shop, customers' lines pop up as bubbles (2s each, queued) and hagglers wait for an answer.
-  const patronBox = make('patrons'), bubble = make('bark', patronBox), haggleBox = make('haggle', patronBox);
-  bubble.hidden = haggleBox.hidden = true;
-  let heard = state.world.clock.totalMinutes, asked = '';
-  const lines: string[] = [];
-  const nextBark = () => {
-    const text = lines.shift(); bubble.hidden = !text;
-    if (text) { bubble.textContent = text; window.setTimeout(nextBark, 2000); }
-  };
+  // C095/C095b: inside the player's own shop, customers' lines pop up as bubbles — as many at once as the crowd allows, stacked
+  // so they never overlap — hagglers wait for an answer, a regular asks for 'the usual' and the first sale gets its moment.
+  const patronBox = make('patrons'), crowdText = make('crowd', patronBox, 'span'), haggleBox = make('haggle', patronBox);
+  const usualBox = make('haggle', patronBox), bubbles = [0, 1, 2, 3].map(i => make(i % 2 ? 'bark alt' : 'bark', patronBox));
+  const warm = make('first-sale'), mute = make('hud-open hud-mute', top, 'button');
+  haggleBox.hidden = usualBox.hidden = warm.hidden = mute.hidden = true;
+  bubbles.forEach(b => { b.hidden = true; });
+  mute.onclick = () => { setMuted(!isMuted()); render(); };
+  let heard = state.world.clock.totalMinutes, asked = '', guessing = '', slowUntil = 0;
+  const lines: string[] = [], sceneOf = () => session.tycoon.state().systems.scene as SceneState | undefined;
+  const crowd = () => { const s = sceneOf(); return s ? crowdOf(s) : crowdLevels[0]; };
+  const nextBark = () => bubbles.forEach((el, i) => {
+    if (!el.hidden || i >= crowd().bubbles || !lines.length) return;
+    el.textContent = lines.shift()!; el.hidden = false;
+    window.setTimeout(() => { el.hidden = true; nextBark(); }, crowd().seconds * 1000);
+  });
   function patronsUi() {
-    const p = session.tycoon.state().systems.patrons as PatronState | undefined, lease = state.leases.find(l => !l.ended);
+    const p = session.tycoon.state().systems.patrons as PatronState | undefined, sc = sceneOf(), lease = state.leases.find(l => !l.ended);
     const shop = state.book.businesses.find(b => b.id === lease?.businessId && b.closedAt === null);
     const inside = !!p && shop?.placeId === state.player.placeId;
-    for (const l of p?.feed ?? []) if (l.minute > heard && inside) lines.push(`${l.name}: “${l.text}”`);
-    heard = Math.max(heard, ...(p?.feed ?? []).map(l => l.minute));
-    if (bubble.hidden && lines.length) nextBark();
+    // Regulars are known by name (C095b ⑥); everyone else by what kind of customer they look like.
+    const who = (npcId: string, name: string) => sc?.regulars[npcId] ? `★ ${name}` : `${personas[p?.personas[npcId] ?? 'browser'].name} 손님`;
+    const fresh = [...(p?.feed ?? []), ...(sc?.feed ?? [])].filter(l => l.minute > heard).sort((a, b) => a.minute - b.minute);
+    if (inside) for (const l of fresh) if (!('kind' in l && l.kind === 'first')) lines.push(`${who(l.npcId, l.name)}: “${l.text}”`);
+    if (inside && fresh.some(l => 'situation' in l && l.situation === 'purchased')) ding();
+    if (inside && sc?.first && sc.first.minute > heard) { // C095b ⑤: once in the whole game, while it happens
+      ding(true); slowUntil = performance.now() + 600; warm.hidden = false;
+      warm.textContent = `첫 1결!\n${who(sc.first.npcId, residents.find(n => n.id === sc.first!.npcId)?.name ?? '')}: “${sceneLines.first}”`;
+      window.setTimeout(() => { warm.hidden = true; }, 2500);
+    }
+    heard = Math.max(heard, ...fresh.map(l => l.minute));
+    nextBark();
+    crowdText.hidden = mute.hidden = !inside;
+    crowdText.textContent = `${crowd().name} · 손님 ${sc?.present.length ?? 0}명`;
+    mute.textContent = isMuted() ? '🔇' : '🔔';
+    const u = inside ? sc?.asks[0] : undefined;
+    usualBox.hidden = !u;
+    if (u && guessing !== u.npcId) {
+      guessing = u.npcId; usualBox.replaceChildren();
+      make('', usualBox, 'div', `${who(u.npcId, residents.find(n => n.id === u.npcId)?.name ?? u.npcId)}: “${sceneLines.usual}”`);
+      const btns = make('haggle-btns', usualBox);
+      for (const st of shop!.store.stock) button(btns, items.find(i => i.id === st.itemId)?.name ?? st.itemId, () => {
+        guessing = ''; session.tycoon.command('scene', (c, s: SceneState) => guessUsual(c, s, u.npcId, st.itemId));
+      });
+    }
     const h = inside ? p!.haggles[0] : undefined;
     haggleBox.hidden = !h;
     if (!h || asked === h.visitId) return;
@@ -414,7 +447,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   setInterval(render, 1000);
   return { stick, knob, say, ready: () => document.getElementById('loading')?.remove(),
     // The clock stops while the player reads the 결폰 or the skip question; main shows 멈춤 for those and dialogue.
-    reading: () => !panel.hidden || !ask.hidden, paused(on: boolean) { pause.hidden = !on; },
+    reading: () => !panel.hidden || !ask.hidden || performance.now() < slowUntil, paused(on: boolean) { pause.hidden = !on; },
     // ?phone=<tab>[,<placeId>] opens the panel (screenshots); door() gets the nearest door, or nothing.
     open(next: string, placeId?: string) {
       if (placeId && places.some(p => p.id === placeId)) act(() => go(placeId));
