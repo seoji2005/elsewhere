@@ -6,7 +6,7 @@ import { CARRY_LIMIT, dropAtShop, pickupOrder, type HaulState } from '../../src/
 
 function setup(seed = 123, fees?: boolean, data = new Map<string, string>()) {
   const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => { data.set(k, v); } };
-  const session = createSession(storage, seed, undefined, fees), { state } = session;
+  const session = createSession(storage, seed, undefined, undefined, fees), { state } = session;
   const total = () => Object.values(state.world.ledger.balances).reduce((a, b) => a + b, 0);
   transfer(state.world.ledger, { id: 'capital', from: 'nuel', to: 'player', amount: 200, time: gameTime(state.world.clock), reason: 'Capital transfer' });
   session.rentStore('shop-unit'); const b = session.openShop('tea');
@@ -61,7 +61,7 @@ it('C096: delivery fee goes producer → courier only in a new game; money is co
     expect(f.total()).toBe(start);
     f.session.tick(1440 / f.state.world.clock.minutesPerSecond); expect(f.tea().backroom + f.tea().displayed).toBe(30);
   }
-  const loaded = setup(123, true), again = createSession(loaded.storage, undefined, undefined, true);
+  const loaded = setup(123, true), again = createSession(loaded.storage, undefined, undefined, undefined, true);
   expect((again.state.tycoon.systems.haul as HaulState).fee).toBe(true);
   const old = setup(123, false), reopened = createSession(old.storage);
   expect(reopened.deliveryCost('tea', 5)).toBe(0); // an existing game stays without fees

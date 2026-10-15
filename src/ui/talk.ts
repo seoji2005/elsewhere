@@ -5,6 +5,7 @@ import type { Npc } from '../data/npcs';
 import type { DialogueChoice } from '../sim/relationship';
 import type { createSession } from '../game/session';
 import type { Closeup } from '../player/player';
+import { leisure } from '../game/tycoon/leisure';
 
 type Session = ReturnType<typeof createSession>;
 type Avatar = Awaited<ReturnType<typeof loadAvatar>>;
@@ -110,7 +111,7 @@ export function talkScene(session: Session, scene: T.Scene, player: T.Object3D, 
     requestAnimationFrame(() => { if (run === token && npc) overlay.classList.add('show'); });
     label.textContent = who.name;
     sub.textContent = ` ${who.job} · ${stageName(who.id)}`;
-    try { const opening = session.buildDialogue(who.id); options = opening.choices; say(opening.line, 0.35); }
+    try { const recalled = leisure(session).recall(who.id), opening = session.buildDialogue(who.id); options = opening.choices; say(recalled ?? opening.line, 0.35); }
     catch { options = []; say(`${who.name} 님이 고개를 끄덕여요.`, 0); }
     if (!spawn) return; // legacy look: dialogue only
     const placement = spot(player, solids);

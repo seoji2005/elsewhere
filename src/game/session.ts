@@ -351,8 +351,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       backup(); // Never overwrite a damaged save until its backup succeeds.
       if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
       const people = Object.fromEntries(Object.entries(state.world.people).filter(([id]) => !id.startsWith('generated-')));
-      // An empty tycoon container reads back identically from v5, so older builds can still open it.
-      const version = JSON.stringify(state.tycoon) === JSON.stringify(createTycoon(systems, ctx)) ? 5 : 6;
+      const version = 6; // v6 = v5 + tycoon container (always written; v5 and older still load)
       storage.setItem(SESSION_KEY, JSON.stringify({ version, state: { ...state, world: { ...state.world, people } } }));
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };

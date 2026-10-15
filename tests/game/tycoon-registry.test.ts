@@ -43,6 +43,9 @@ const snapshot = (session: ReturnType<typeof createSession>) =>
 it('C093: a v5 save opens with an empty tycoon container and unchanged money, leases and shops', () => {
   const storage = memory(), old = createSession(storage, 77, []); // C095: the default registry is no longer empty
   old.rentStore('cafe-unit'); old.openShop('tea'); old.tick(600); old.saveNow();
+  // A true v5 fixture: v6 minus the tycoon container (master 2026-10-16: saves are always v6 now).
+  const v6 = JSON.parse(storage.getItem(SESSION_KEY)!); expect(v6.version).toBe(6); delete v6.state.tycoon;
+  storage.setItem(SESSION_KEY, JSON.stringify({ ...v6, version: 5 }));
   const raw = storage.getItem(SESSION_KEY)!; expect(JSON.parse(raw).version).toBe(5);
   const before = JSON.parse(raw).state;
   const empty = createSession(storage, undefined, []);
