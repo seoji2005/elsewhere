@@ -1,6 +1,6 @@
 import { companies } from '../data/companies';
 import { revealMarketHint, type MarketState } from './market';
-import { dialogueFor, sharedMemoryTemplates, marketHintLines } from '../data/dialogue';
+import { dialogueFor, sharedMemoryTemplates, conflictTemplates, marketHintLines } from '../data/dialogue';
 import type { Npc } from '../data/npcs';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
@@ -24,6 +24,10 @@ function informalFor(ctx: DialogueContext): boolean | undefined {
   return scene ? !scene.atWork && scene.peopleCount === 2
     && (scene.bond ? friendly(scene.bond) : ctx.value >= 30) : undefined;
 }
+export function conflictLine(ctx: DialogueContext): string | undefined {
+  const hurt = ctx.scene?.bond?.hurt;
+  return hurt ? conflictTemplates[informalFor(ctx) ? 'casual' : 'polite'][hurt.resolved ? 'reconciled' : 'hurt'] : undefined;
+}
 export function createDialogueState(): DialogueState { return { memories: {}, dating: [] }; }
 function validate(ctx: DialogueContext): void {
   minuteOf(ctx.time);
@@ -38,7 +42,8 @@ export function isDating(state: DialogueState, actorId: string, npcId: string): 
 export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
   const template = dialogueFor(ctx.npc, ctx.scene?.bond?.affection ?? ctx.value, ctx.actorId, informalFor(ctx));
-  const memories = informalFor(ctx) === false ? undefined : state.memories[ctx.npc.id];
+  const pending = ctx.scene?.bond?.hurt?.resolved === false;
+  const memories = pending || informalFor(ctx) === false ? undefined : state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
   const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
@@ -63,11 +68,12 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   const choices: DialogueChoice[] = ctx.npc.likes.map((topic, index) => ({
     id: `chat:${index}`, topic, tone: ctx.npc.traits[0] ?? 'quiet',
   }));
-  const hint = ctx.market && ctx.scene?.bond && friendly(ctx.scene.bond) && informalFor(ctx)
+  // No tips while a conflict is unresolved (C074): the line is the awkward one.
+  const hint = !pending && ctx.market && ctx.scene?.bond && friendly(ctx.scene.bond) && informalFor(ctx)
     ? revealMarketHint(ctx.market, ctx.npc.job) : undefined;
   const hintLine = hint ? marketHintLines[hint.size > 0 ? 'good' : 'bad']
     .replace('{company}', companies.find(c => c.id === hint.companyId)!.name) : '';
-  return { line: (sharedLine ?? (familiar && past && past.created < now
+  return { line: ((pending ? conflictLine(ctx) : undefined) ?? sharedLine ?? (familiar && past && past.created < now
     ? memoryLine(past) : familiar ? template.familiar : template.greeting)) + (hintLine ? ` ${hintLine}` : ''),
     // The legacy 90-point label is numeric; dating is only established by mutual consent.
     stage: ctx.value >= 90 && !isDating(state, ctx.actorId, ctx.npc.id)
