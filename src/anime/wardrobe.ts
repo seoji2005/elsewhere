@@ -14,7 +14,10 @@ export const outfits = [
   { name: '사교형', source: 'shino', colors: ['#fff4f0', '#e59aae', '#6c4f73', '#f0d08a', '#d8c4b4', '#a87a55', '#7a9a6a'] },
   { name: '여학생', source: 'shibu', colors: ['#f8f8f4', '#2f3f6b', '#4e5a73', '#b23a48', '#3a3030', '#1f2230', '#5a4a40'] },
 ] as const;
-export type Outfit = typeof outfits[number];
+// ?model=lise-c (C063): Lise built in Blender on the VRoid sample (tools/blender/lise_vroid.py). Her colours are baked
+// into flat cloth materials and renamed hair/iris maps, so no slot is repainted.
+export const LISE_C = { name: '리세', source: 'lisec', colors: [] } as const;
+export type Outfit = typeof outfits[number] | typeof LISE_C;
 const textures = new Map<string, T.Texture>(), materials = new Map<string, T.Material>();
 
 // Repaint an authored map as flat colour with soft shading: opaque pixels split into a light and a dark half (shirt vs

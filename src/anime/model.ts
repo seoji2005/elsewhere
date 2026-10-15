@@ -8,9 +8,10 @@ import shibu from '../assets/shibu.vrm?url';
 import basemale from '../assets/basemale.vrm?url';
 import hoodie from '../assets/hoodie.vrm?url';
 import fumiriya from '../assets/fumiriya.vrm?url';
+import lisec from '../assets/lisec.vrm?url';
 import { dress, type Outfit } from './wardrobe';
 
-const urls = { shino, shibu, basemale, hoodie, fumiriya };
+const urls = { shino, shibu, basemale, hoodie, fumiriya, lisec };
 const originals = new Map<string, Promise<GLTF>>(), geometry = new Map<string, T.BufferGeometry>();
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).register(parser => {
   const plugin = new VRMLoaderPlugin(parser);

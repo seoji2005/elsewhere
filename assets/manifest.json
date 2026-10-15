@@ -89,5 +89,12 @@
       "Sakurada Fumiriya.vrm"
     ],
     "maxTexture": 512
+  },
+  "lisec": {
+    "directory": "/home/dev/asset-packs/vroid-cc0/lise-c",
+    "files": [
+      "lise-c.vrm"
+    ],
+    "maxTexture": 512
   }
 }

@@ -13,7 +13,7 @@ import { duskLUT } from './render/duskLUT';
 import { time, tone, spots } from './render/style';
 import { loadCharacter } from './player/character';
 import { loadAvatar } from './anime/avatar';
-import { outfits } from './anime/wardrobe';
+import { outfits, LISE_C } from './anime/wardrobe';
 import { cloudCards } from './anime/clouds';
 import { playerControls } from './player/controls';
 import { followPlayer } from './player/player';
@@ -55,7 +55,7 @@ if (look === 'b' && !post) { // no post passes: the same Reinhard curve and expo
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera, sd) : loadCharacter()]);
+const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera, sd, query.get('model') === 'lise-c' ? LISE_C : outfits[0]) : loadCharacter()]);
 const cast: Awaited<ReturnType<typeof loadAvatar>>[] = [];
 if (anime && query.get('cast') === '1') {
   // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
