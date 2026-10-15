@@ -15,7 +15,7 @@ img = c.predict(handle_file(src), api_name="/preprocess_image")
 img = img if isinstance(img, str) else img["path"]
 c.predict(handle_file(img), int(opt.get("seed", 0)), str(opt.get("resolution", "1024")), api_name="/image_to_3d")
 print("shape done", round(time.time() - t), "s")
-glb, dl = c.predict(int(opt.get("faces", 30000)), int(opt.get("texture", 1024)), api_name="/extract_glb")
+glb, dl = c.predict(int(opt.get("faces", 300000)), int(opt.get("texture", 2048)), api_name="/extract_glb")
 path = glb if isinstance(glb, str) else (glb or {}).get("path") or dl
 shutil.copy(path, os.path.join(out, "model.glb"))
 print("glb", os.path.getsize(os.path.join(out, "model.glb")), "bytes", round(time.time() - t), "s")
