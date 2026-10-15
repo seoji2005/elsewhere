@@ -17,6 +17,7 @@ import { trade } from '../sim/market';
 import { asleep, sentToday, waiting, DAILY_LIMIT } from '../sim/messenger';
 import type { createSession } from '../game/session';
 import { shopKey, shopStatus, shopTab } from './shop';
+import { answerHaggle, type PatronState } from '../game/tycoon/patrons';
 
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
@@ -300,8 +301,36 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       line.onclick = () => act(() => { selected = n.id; });
     }
   }
+  // C095: inside the player's own shop, customers' lines pop up as bubbles (2s each, queued) and hagglers wait for an answer.
+  const patronBox = make('patrons'), bubble = make('bark', patronBox), ask = make('haggle', patronBox);
+  bubble.hidden = ask.hidden = true;
+  let heard = state.world.clock.totalMinutes, asked = '';
+  const lines: string[] = [];
+  const nextBark = () => {
+    const text = lines.shift(); bubble.hidden = !text;
+    if (text) { bubble.textContent = text; window.setTimeout(nextBark, 2000); }
+  };
+  function patronsUi() {
+    const p = session.tycoon.state().systems.patrons as PatronState | undefined, lease = state.leases.find(l => !l.ended);
+    const shop = state.book.businesses.find(b => b.id === lease?.businessId && b.closedAt === null);
+    const inside = !!p && shop?.placeId === state.player.placeId;
+    for (const l of p?.feed ?? []) if (l.minute > heard && inside) lines.push(`${l.name}: “${l.text}”`);
+    heard = Math.max(heard, ...(p?.feed ?? []).map(l => l.minute));
+    if (bubble.hidden && lines.length) nextBark();
+    const h = inside ? p!.haggles[0] : undefined;
+    ask.hidden = !h;
+    if (!h || asked === h.visitId) return;
+    asked = h.visitId; ask.replaceChildren();
+    const name = residents.find(n => n.id === h.npcId)?.name ?? h.npcId, list = shop!.store.stock.find(s => s.itemId === h.itemId)?.price ?? 0;
+    const said = [...p!.feed].reverse().find(l => l.npcId === h.npcId && l.situation === 'haggle')?.text ?? '조금 깎아 주세요.';
+    make('', ask, 'div', `${name}: “${said}”\n${items.find(i => i.id === h.itemId)?.name ?? h.itemId} ${list}결 → ${h.offer}결`);
+    const reply = (accept: boolean) => () => { asked = ''; return session.tycoon.command('patrons', (c, s: PatronState) =>
+      answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔 물건이 없어요' : `${name} 님이 그냥 갔어요`; };
+    button(make('haggle-btns', ask), '깎아 주기', reply(true)); button(ask.lastElementChild as HTMLElement, '안 돼요', reply(false));
+  }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
+    patronsUi();
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
