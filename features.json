@@ -141,7 +141,6 @@
       "id": "M1-21",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "생성 주민 50명 원형별 대사·반말 전환 연결 및 이웃·동료 초기 인맥 시드",
       "check": "생성 주민과 대화·선물·소개팅·고백이 오류 없이 동작하고 친해지면 말투(반말/호칭)가 바뀐다",
       "passes": false
@@ -150,7 +149,6 @@
       "id": "M1-22",
       "stage": "M1",
       "owner": "auto",
-      "proposed": true,
       "desc": "공·사 반전 말투(Public vs Private): 일터·다중 밀집 장소에서는 존댓말, 단둘이 있을 때는 친밀도에 따라 반말·속마음 대사",
       "check": "같은 NPC라도 낮 조율실(여럿)과 밤 공원(단둘)에서 건네는 인사말과 어미가 다르게 나온다",
       "passes": false
@@ -159,7 +157,6 @@
       "id": "M2-03",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "주선자 말투가 담긴 '블라인드 소개팅 인물 메모'와 약속 노쇼(No-show) 시 주선자 신뢰도 하락",
       "check": "소개팅 제안 시 주선자 말투로 상대 외형·성격 힌트를 듣고, 노쇼하면 주선자와의 trust가 깎인다",
       "passes": false
@@ -168,7 +165,6 @@
       "id": "M2-04",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "의상(appearance)·방 꾸미기(atmosphere) 스탯의 실효성 연결: 첫인상 호감 보너스 및 '집으로 초대하기' 데이트 해금",
       "check": "옷을 입으면 첫 만남·소개팅 관심 점수가 오르고, 방 장식 점수가 일정 이상이면 호감 상대를 집에 초대해 함께 차를 마신다",
       "passes": false
@@ -177,7 +173,6 @@
       "id": "M2-05",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "동네 대화 속 '주가 전조 단서(내부자 힌트)': 주민과 친해지면 작황·수요 변동을 미리 듣고 주식에 투자",
       "check": "특정 직업 주민과의 대화에서 회사 호재·악재 단서가 나오고 실제로 해당 상장사 MarketEvent가 발생한다",
       "passes": false
@@ -186,7 +181,6 @@
       "id": "M2-06",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "시간대별 고유 동행(Shared Work) 이벤트: 밤 10시 리세의 등불 순찰, 벨로의 새벽 밤결 기록 등 특별 일과 돕기",
       "check": "특정 시간·장소에서만 열리는 동행 행동을 완료하면 shared-work 기억이 남고 다음 날 특별 회상 대사를 듣는다",
       "passes": false
@@ -195,7 +189,6 @@
       "id": "M2-07",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "날씨·요일 유행에 반응하는 내 가게 가격(setPrice)·재고 전략과 바가지/품절 불만에 따른 동네 평판 변화",
       "check": "비 오는 날 차·수프 지불 용의 가격(maxPrice)이 오르고, 품절·고가 불만이 쌓이면 평판에 반영된다",
       "passes": false
@@ -204,7 +197,6 @@
       "id": "M2-08",
       "stage": "M2",
       "owner": "auto",
-      "proposed": true,
       "desc": "갈등과 화해(Hurt & Apology): 실수나 노쇼로 서먹해진 뒤 맞춤 선물·사과로 화해하면 신뢰(trust)·편안함(comfort)이 더 깊어짐",
       "check": "관계 감소 사건 후 사과 대화를 성공하면 이전보다 높은 신뢰 보너스와 전용 대사가 출력된다",
       "passes": false
