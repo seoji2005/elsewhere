@@ -167,3 +167,4 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 .hud-say { word-break: keep-all; }
 .hud-body details summary { min-height: 32px; line-height: 32px; }
 .hud-now { position: sticky; bottom: 0; margin-top: 10px; padding: 8px 12px; border-radius: 10px; background: #2c3a55; color: #e8eefc; font-weight: 700; }
+.hud-verdict { margin: 6px 0; font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -34,11 +34,27 @@ export const advanceRate = 0.4;
 export type DevId = 'novice' | 'senior';
 export const developers: Record<DevId, { label: string; line: string; hours: [number, number]; defect: number; successFee: number | null;
   work: Partial<Record<ScopeId, [number, number]>>; refuse: string }> = {
-  novice: { label: '꼼꼼한 입문 개발자', line: '목록 정리는 자신 있어요. 첫 실적이면 성공보수로도 할게요.', hours: [9, 15], defect: 0.08, successFee: 120,
+  novice: { label: '꼼꼼한 입문 개발자', line: '목록 정리는 자신 있고 첫 실적이면 성공보수로도 할게요.', hours: [9, 15], defect: 0.08, successFee: 120,
     work: { list: [60, 80], normal: [90, 120] }, refuse: '원래 주문과 연결하는 부분은 아직 못 맡아요.' },
-  senior: { label: '업무 경험이 있는 개발자', line: '중복·변경 반영까지 해 봤어요. 오후에 시간이 나요.', hours: [13, 19], defect: 0.03, successFee: null,
+  senior: { label: '업무 경험이 있는 개발자', line: '중복·변경 반영까지 해 봤고 오후에 시간이 나요.', hours: [13, 19], defect: 0.03, successFee: null,
     work: { list: [45, 110], normal: [60, 150], extended: [90, 180] }, refuse: '' },
 };
 /** 데이터 조항 기본안: 개발자는 이 필드만 본다(주소·연락처는 고객 화면에 남는다). 재사용은 고객 동의가 있을 때만. */
 export const devFields = ['id', 'item', 'qty'] as const;
 export const keepDays = 7;
+
+/** C104 검수: 대표 10건 밖의 안전 사례(주소 누락·같은 요청 재전송). 권한 없는 데이터 재사용은 개발자 입력으로 따로 본다. */
+export const safetyCases: readonly OrderCase[] = [
+  { id: 's0', kind: 'missing', text: '[안전] 도시락 5개 급해요(주소 없음)', address: '', contact: '010-7', item: '도시락', qty: 5 },
+  { id: 's1', kind: 'duplicate', text: '[안전] 잔향 차 두 봉지요(같은 요청 재전송)', address: '2층', contact: '010-4', item: '잔향 차', qty: 2 },
+];
+export const reworkMinutes = 30;
+/** 실패 사례를 열었을 때 고를 수 있는 한마디(기능군별). */
+export const fixLines: Record<string, string> = { list: '목록에서 사라지면 안 돼요', normal: '이 경우는 자동 확정하면 안 돼요',
+  duplicate: '같은 주문이 두 번 생기면 안 돼요', changed: '바뀐 주문은 원래 주문에 반영해야 해요' };
+/** 고객의 마지막 한마디: 납품(범위별)·다음 일감 후보·실패. */
+export const closing: Record<ScopeId, string> = { list: '목록에서 빠지는 일이 없어져서 고마워요.',
+  normal: '정상 주문은 이제 손이 안 가고 확인할 것만 따로 모여요.', extended: '중복이랑 변경까지 알아서 정리돼서 숨 좀 돌려요.' };
+export const nextLines: Partial<Record<ScopeId, string>> = { normal: '정상 주문은 늘 똑같이 확인하는데 다음엔 정상 주문까지 맡길까요?',
+  extended: '변경 주문 확인이 계속 쌓이는데 변경까지 맡길 수 있을까요?' };
+export const failLine = '고쳤는데도 그대로라 이번 일은 여기서 끝낼게요.';
