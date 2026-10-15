@@ -26,7 +26,7 @@ function targetSpeed(length: number) {
   return length >= 0.85 ? RUN : WALK * (0.35 + 0.65 * Math.min(1, (length - 0.12) / 0.6));
 }
 
-export function followPlayer(body: T.Object3D, camera: T.PerspectiveCamera, world: World) {
+export function followPlayer(body: T.Object3D, camera: T.PerspectiveCamera, world: World, focusHeight = 1.4) {
   const velocity = new T.Vector3(), focus = new T.Vector3(), ray = new T.Ray(), hit = new T.Vector3();
   let yaw = 0, pitch = 0, distance = 0, first = true;
   collide(body.position, world.solids);
@@ -48,7 +48,7 @@ export function followPlayer(body: T.Object3D, camera: T.PerspectiveCamera, worl
     // Third-person orbit: smooth follow, and pull in in front of any wall between player and camera.
     const smooth = first ? 1 : 1 - Math.exp(-dt * 10);
     yaw += (view.yaw - yaw) * smooth; pitch += (view.pitch - pitch) * smooth;
-    focus.lerp(hit.copy(body.position).setY(body.position.y + 1.4), first ? 1 : 1 - Math.exp(-dt * 8));
+    focus.lerp(hit.copy(body.position).setY(body.position.y + focusHeight), first ? 1 : 1 - Math.exp(-dt * 8));
     ray.set(focus, new T.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)));
     let allowed = view.dist;
     for (const wall of world.walls)

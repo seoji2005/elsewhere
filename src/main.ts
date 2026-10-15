@@ -11,6 +11,7 @@ import { CheapBloom } from './render/cheapBloom';
 import { duskLUT } from './render/duskLUT';
 import { loadCharacter } from './player/character';
 import { loadAvatar } from './anime/avatar';
+import { outfits } from './anime/wardrobe';
 import { cloudCards } from './anime/clouds';
 import { playerControls } from './player/controls';
 import { followPlayer } from './player/player';
@@ -26,6 +27,7 @@ import { generate } from './sim/npcgen';
 const query = new URLSearchParams(location.search);
 // style=anime (default: VRM hero, toon city, time=day|dusk) or style=current (the look A/B corner as before).
 const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
+const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 2; // user 2026-10-15: 2.7 heads
 const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
 // Phone measurement switches (?debug=1 shows fps, render height, draw calls, triangles):
 // msaa=0|4, bloom=0|1, lut=0|1, shadow=off|static|dynamic, dpr=<fixed pixel ratio>.
@@ -47,7 +49,12 @@ if (look === 'b' && !post) { // no post passes: the same Reinhard curve and expo
 renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
-const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera) : loadCharacter()]);
+const [world, character] = await Promise.all([buildCorner(scene), anime ? loadAvatar(camera, sd) : loadCharacter()]);
+const cast: Awaited<ReturnType<typeof loadAvatar>>[] = [];
+if (anime && query.get('cast') === '1') {
+  // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
+  for (let i = 1; i < outfits.length; i++) cast.push(await loadAvatar(camera, sd, outfits[i], i * 0.47));
+}
 applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6);
 if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
@@ -91,11 +98,27 @@ addEventListener('visibilitychange', () => { if (document.hidden) { syncPosition
 const [phoneTab, phonePlace] = (query.get('phone') ?? '').split(',');
 if (phoneTab) ui.open(phoneTab, phonePlace);
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
+// ?cast=1: the zebra crossing by the corner is the only open ground (sidewalks are 1.3 m deep). A half ring behind
+// the player as seen from the start camera, everyone turned to the camera, so no bollard, planter or back covers a face.
+const stage = new T.Vector3(-6.3, 0, -2.2), yaw = controls.state.yaw;
+if (cast.length) { character.group.position.copy(stage); character.group.rotation.y = yaw; }
+cast.forEach((person, i) => {
+  const angle = Math.PI * (0.2 + 0.6 * i / (cast.length - 1)), back = -2 * Math.sin(angle), side = 2 * Math.cos(angle);
+  person.group.position.set(stage.x + back * Math.sin(yaw) + side * Math.cos(yaw), 0, stage.z + back * Math.cos(yaw) - side * Math.sin(yaw));
+  person.group.rotation.y = Math.atan2(stage.x + 3 * Math.sin(yaw) - person.group.position.x, stage.z + 3 * Math.cos(yaw) - person.group.position.z);
+  scene.add(person.group);
+});
+if (blob) cast.forEach(person => {
+  const contact = blob.clone();
+  contact.position.copy(person.group.position).setY(person.group.position.y + 0.02);
+  scene.add(contact);
+});
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
 controls.state.dist = Number(query.get('dist')) || controls.state.dist;
 controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
 const move = Number(query.get('move')) || 0;
-const follow = followPlayer(character.group, camera, world);
+const follow = followPlayer(character.group, camera, world,
+  anime ? (character as Awaited<ReturnType<typeof loadAvatar>>).focusHeight : 1.4);
 // Anime: the sun comes from behind the default view, so the façades in sight are lit and shadows fall away.
 const sunElevation = day ? 36 : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
 toSun.y = Math.tan(sunElevation * Math.PI / 180) * Math.hypot(toSun.x, toSun.z);
@@ -187,6 +210,7 @@ renderer.setAnimationLoop(now => {
   positionElapsed += dt;
   if (positionElapsed >= 0.2) { syncPosition(); positionElapsed = 0; }
   if (session.tick(Math.max(0, Math.min(dt, 5)))?.ok === false) ui.say('저장하지 못했어요');
+  cast.forEach(person => person.update(0, Math.min(dt, 0.1)));
   sky.position.copy(camera.position);
   blob?.position.copy(character.group.position).setY(character.group.position.y + 0.02);
   renderer.info.reset();
@@ -197,6 +221,7 @@ renderer.setAnimationLoop(now => {
 });
 // Read-only diagnostics for browser verification and tests/play.
 Object.assign(window, { cornerDiagnostics: () => ({ look, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
+  sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),
   sunElevation, cornerDistance: Math.hypot(camera.position.x, camera.position.z),
