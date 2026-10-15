@@ -254,7 +254,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     title('가진 물건');
     if (!owned().length) note('아직 없어요.');
     for (const item of owned()) button(row(item.name, () => `${state.shop.residents.player!.inventory[item.id]}개`), '쓰기',
-      () => `${item.name} 썼어요 · 활력 ${useItem(state.shop, 'player', item.id).energy}`);
+      () => `${item.name} 썼어요 · 활력 ${Math.round(useItem(state.shop, 'player', item.id).energy)}`);
   }
   function stocks() {
     title('결증 (1주씩, 수수료 1%)');
