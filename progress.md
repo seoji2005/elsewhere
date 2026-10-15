@@ -20,9 +20,10 @@
 - 그래픽 main: 툰 fable A + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선). 캐릭터 6.5~7등신(VRoid 원비율). 도구: tools/style-sheet.mjs(검사 시트), tools/normalize.mjs(C066 에셋 스타일 변환기), shot.mjs @cam 수정(C068).
 - 문서: docs/look/STYLE.md(아트 바이블, §10 보강; 참고 그림은 예시일 뿐), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
 **사용자 결정(10-15)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감. 기능 제안 8개 승인. 화풍 12종 중 10번 과슈 최고, 2·3·4 다음. 캐릭터를 제대로 만들고 싶다(지금 최우선).
-**열린 작업(워크트리, 커밋 안 됨 — 결과 확인 필요)**
-- cl/c063 /home/dev/game-wt/c063: 리세 VRoid 소체 + 4원칙(Blender MCP). 1라운드 4방향 렌더 .shots/c063-r1-*.png → 마스터 검수 2회 이상 → VRM 내보내기 → ?model=lise-c. 카드 cards/C063.md.
-- cl/c067 /home/dev/game-wt/c067: 뉴욕풍 건물 6종 + ?block=1 시험 블록. 카드 cards/C067.md.
+**열린 작업(2026-10-15 20:40, 워크트리 커밋 안 됨)**
+- cl/c063 /home/dev/game-wt/c063: 리세 lise-c 완료(마스터가 Blender 직접, 9라운드 .shots/c063-r1~r9, 재현 tools/blender/lise_vroid.py 370줄, src/assets/lisec.vrm 712KB, ?model=lise-c). 남은 것: 빌드 10311KB > 10240KB → C070 뒤 합침. 렌더는 xvfb 창 모드(-b는 EGL 없음), Blender는 한 번에 하나(3.8GB, 19:12 OOM으로 전 세션 재시작).
+- cl/c067 /home/dev/game-wt/c067: 건물 6종+?block=1 완료(작업자 보고 ~/ops/workers/c067-r2.json, 빌드 9763KB). sim 180일 테스트 시간 초과만(서버 부하). C070 뒤 합침.
+- cx/c070 /home/dev/game-wt/c070: Codex 빌드 용량 ≥900KB 확보(people.glb 모션 분리 등). 끝나면 main 합침 → C063·C067 합침.
 - cl/c069 /home/dev/game-wt/c069: 과슈풍 ?look=gouache (커밋됨, main 미합침). 사용자 과슈/툰 선택 대기. 체험판 https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1
 **대기 중(사용자)**
 - 3자 비교: Meshy·Tripo 무료로 https://3-34-132-123.sslip.io/gen/lise-input-183825/ 1번 그림 → GLB를 elsewhere incoming/에 업로드. 오면 C063 결과와 같은 장면에 나란히(얼굴·실루엣·걷기·툰/과슈·용량 점수표).
