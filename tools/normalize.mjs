@@ -10,7 +10,7 @@ try {
     throw Error('Usage: node tools/normalize.mjs <in.glb> <out.glb> --kind prop|building|tree --height <positive metres>');
   const reportPath = resolve(positionals[1]) + '.json';
   rmSync(reportPath, { force: true });
-  execFileSync('/usr/local/bin/blender', ['--background', '--factory-startup', '--python', fileURLToPath(new URL('./blender/normalize.py', import.meta.url)), '--', ...positionals.map(p => resolve(p)), values.kind, String(height)], { stdio: ['ignore', 2, 2], timeout: 120000 });
+  execFileSync(process.env.BLENDER || '/usr/local/bin/blender', ['--background', '--factory-startup', '--python', fileURLToPath(new URL('./blender/normalize.py', import.meta.url)), '--', ...positionals.map(p => resolve(p)), values.kind, String(height)], { stdio: ['ignore', 2, 2], timeout: 120000 });
   const report = JSON.parse(readFileSync(reportPath, 'utf8'));
   if (report.triangles_after > budget || Math.abs(report.size_m.height - height) > 1e-5) throw Error('Output failed budget/height checks');
   console.log(JSON.stringify(report));
