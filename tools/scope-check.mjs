@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const run = promisify(execFile);
 const git = async (...args) => (await run('git', args, { encoding: 'utf8' })).stdout;
@@ -22,7 +22,9 @@ let total = 0;
 for (const file of files) {
   const inScope = allowed.some(pattern => pattern.test(file));
   let lines;
-  if (readFileSync(file).includes(0)) {
+  if (!existsSync(file)) {
+    lines = 0; // Deleted files still undergo the scope check.
+  } else if (readFileSync(file).includes(0)) {
     lines = 0; // Binary assets still undergo the scope check.
   } else if (untracked.has(file)) {
     const contents = readFileSync(file, 'utf8');
