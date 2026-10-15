@@ -41,11 +41,11 @@ const snapshot = (session: ReturnType<typeof createSession>) =>
   ({ tycoon: session.tycoon.state(), balances: session.state.world.ledger.balances });
 
 it('C093: a v5 save opens with an empty tycoon container and unchanged money, leases and shops', () => {
-  const storage = memory(), old = createSession(storage, 77);
+  const storage = memory(), old = createSession(storage, 77, []);
   old.rentStore('cafe-unit'); old.openShop('tea'); old.tick(600); old.saveNow();
   const raw = storage.getItem(SESSION_KEY)!; expect(JSON.parse(raw).version).toBe(5);
   const before = JSON.parse(raw).state;
-  const empty = createSession(storage);
+  const empty = createSession(storage, undefined, []);
   expect(empty.loadResult.ok).toBe(true); expect(empty.tycoon.state()).toEqual(emptyTycoon());
   const withSystems = createSession(storage, undefined, systems);
   for (const next of [empty, withSystems]) {

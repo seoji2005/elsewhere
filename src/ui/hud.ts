@@ -17,6 +17,9 @@ import { trade } from '../sim/market';
 import { asleep, sentToday, waiting, DAILY_LIMIT } from '../sim/messenger';
 import type { createSession } from '../game/session';
 import { shopKey, shopStatus, shopTab } from './shop';
+import { shows } from '../data/shows';
+import { npcs } from '../data/npcs';
+import { leisure } from '../game/tycoon/leisure';
 
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
@@ -26,7 +29,7 @@ const two = (n: number) => String(n).padStart(2, '0');
 const clock = (t: GameTime) => `${t.day}일째 ${two(t.hour)}:${two(t.minute)}`;
 const problems: Record<string, string> = {
   'Outside work hours': '지금은 근무 시간이 아니에요', 'Unfinished shift': '끝나지 않은 근무가 있어요',
-  'Insufficient funds': '결이 모자라요', unaffordable: '결이 모자라요', 'Savings reserved': '결이 모자라요',
+  'Insufficient funds': '결이 모자라요', 'Not acquainted': '아는 사이부터 함께 갈 수 있어요', 'Show over': '공연이 끝났어요', unaffordable: '결이 모자라요', 'Savings reserved': '결이 모자라요',
   missing: '물건이 다 떨어졌어요', expensive: '값이 너무 올랐어요', 'Not queue head': '앞 손님이 계산 중이에요',
 };
 
@@ -89,6 +92,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     const { romance, affection } = readBond(state.bonds, 'player', npc.id);
     return romance >= 60 ? 'love' : romance >= 40 ? 'crush' : affection >= 30 ? 'friend' : 'unset';
   };
+  const fun = leisure(session), hm = (m: number) => `${two(Math.floor(m / 60))}:${two(m % 60)}`;
   const owned = () => items.filter(item => (state.shop.residents.player?.inventory[item.id] ?? 0) > 0);
   // Every action re-renders; a returned string is toasted, a thrown sim error becomes a short Korean reason.
   const act = (action: () => string | void) => {
@@ -223,7 +227,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       const line = row(`${n.name} · ${stage(n)}`, () => `${n.job} · ${scores(n)}`);
       live(line.querySelector('.hud-label')!.firstChild!, () => `${n.name} · ${stage(n)}`);
       line.classList.add('tap');
-      line.onclick = () => act(() => { selected = n.id; speak(n, () => session.buildDialogue(n.id).line)(); });
+      line.onclick = () => act(() => { selected = n.id; speak(n, () => fun.recall(n.id) ?? session.buildDialogue(n.id).line)(); });
     }
   }
   function work(job: Job) {
@@ -257,6 +261,28 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     if (!owned().length) note('아직 없어요.');
     for (const item of owned()) button(row(item.name, () => `${state.shop.residents.player!.inventory[item.id]}개`), '쓰기',
       () => `${item.name} 썼어요 · 활력 ${Math.round(useItem(state.shop, 'player', item.id).energy)}`);
+    evening();
+  }
+  // 오늘 저녁 공연: a ticket (alone or treating an acquaintance), then a taste pick while at the venue during the show.
+  function evening() {
+    title('오늘 저녁 공연');
+    for (const show of shows) {
+      const host = npcs.find(n => n.id === show.hostId)!, mine = () => fun.today().filter(t => t.showId === show.id);
+      live(row(show.name, '').querySelector('.hud-sub')!, () => ` ${placeName(show.placeId)} ${hm(show.start)}~${hm(show.end)} · ${show.price}결 · ${host.name}`
+        + (mine().length ? ` · 표 ${mine().length}장${mine().filter(t => t.companionId).map(t => ` (${npcs.find(n => n.id === t.companionId)?.name})`).join('')}` : ''));
+      const chosen = show.scenes.find(c => mine().some(t => t.sceneId === c.id));
+      if (chosen) { note(`기억: ${chosen.memory}`); continue; }
+      if (mine().some(t => t.status === 'attended') && state.player.placeId === show.placeId) {
+        const chips = make('hud-chips', body);
+        for (const scene of show.scenes) button(chips, scene.name, () => `${fun.choose(scene.id).name} · 활력 +15`);
+        continue;
+      }
+      if (mine().some(t => t.status !== 'booked')) continue;
+      const chips = make('hud-chips', body), friends = npcs.filter(n => n.id !== show.hostId && stage(n) !== '낯섦');
+      button(chips, '혼자 표 사기', () => { fun.buyTicket(show.id); return `${show.name} 표를 샀어요 (-${show.price}결)`; });
+      for (const n of friends) button(chips, `${n.name} 님과`, () => {
+        fun.buyTicket(show.id, n.id); return `${n.name} 님과 함께 갈 표를 샀어요 (-${show.price * 2}결)`; });
+    }
   }
   function stocks() {
     title('결증 (1주씩, 수수료 1%)');
@@ -311,6 +337,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     weatherText.textContent = shop.icon;
     weatherText.title = shop.name;
     warnText.textContent = shop.warning;
+    fun.sync();
     pending ||= force;
     if (panel.hidden) return;
     const membership = tab === 'people'
@@ -319,7 +346,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
         selected ? owned().map(i => i.id) : []]
       : tab === 'work'
         ? [state.book.businesses.filter(b => b.placeId === state.player.placeId && b.closedAt === null)
-          .map(b => [b.id, b.store.stock.map(s => s.itemId)]), owned().map(i => i.id)]
+          .map(b => [b.id, b.store.stock.map(s => s.itemId)]), owned().map(i => i.id),
+          fun.today().map(t => [t.status, t.sceneId])]
         : tab === 'chat' ? [contacts().map(n => n.id), state.messenger.messages.filter(m => m.delivered).length]
         : tab === 'shop' ? shopKey(state)
         : [companies.map(c => c.id), Object.keys(state.market.holdings.player ?? {})
