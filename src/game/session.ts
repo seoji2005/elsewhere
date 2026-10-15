@@ -17,8 +17,8 @@ import { createRelationshipState, relationshipStage, type DialogueChoice } from 
 import { createEncounterState } from '../sim/encounter';
 import { createMatchmakingState, resolveMatch, noShowEffects, requestMatch, type MatchRequest } from '../sim/matchmaking';
 import { minuteOf, createMemoryState, rememberSharedEvent, type SharedEvent } from '../sim/memory';
-import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly } from '../sim/bonds';
-import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, type Consent } from '../sim/dialogue';
+import { axes, createBonds, seedLegacy, edgeKey, emptyBond, applyBondEvent, reactionEffect, readBond, stageOf, canStartDating, friendly, reconcileBond } from '../sim/bonds';
+import { createDialogueState, buildDialogue, talk, recordDialogue, confess, isDating, conflictLine, type Consent } from '../sim/dialogue';
 import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '../sim/ripple';
 import { createPurse, funds, personAccount, payPerson, dayCashflow } from '../sim/purse';
 import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, procure, producerJobs, type BusinessBook } from '../sim/business';
@@ -135,6 +135,11 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
   require(['legacy', 'bonds'].includes(state.relationMode) && state.bonds.version === 1);
   for (const [key, bond] of Object.entries(state.bonds.edges)) {
     pairKey(key); checkShape(bond, { ...Object.fromEntries(axes.map(axis => [axis, 0])), met: false });
+    // Missing hurt means no pending incident in older saves.
+    if (bond.hurt !== undefined) {
+      checkShape(bond.hurt, { id: '', trust: 0, comfort: 0, resolved: false });
+      require(id(bond.hurt.id) && [bond.hurt.trust, bond.hurt.comfort].every(n => n >= -100 && n <= 100));
+    }
     require(axes.every(axis => bond[axis] >= (axis === 'romance' ? 0 : -100) && bond[axis] <= 100)
       && (bond.legacyScore === undefined || Number.isFinite(bond.legacyScore)));
   }
@@ -379,6 +384,12 @@ export function createSession(storage: Storage, npcSeed?: number) {
       const notice = noticeLine(npcId, state.ripple, gameTime(state.world.clock), names);
       return { ...result, line: notice ? `${notice} ${result.line}` : result.line };
     },
+    apologize(npcId: string) {
+      requirePresent(npcId);
+      const ctx = context(npcId), accepted = state.relationMode === 'bonds'
+        && reconcileBond(state.bonds, npcId, 'player', ctx.time);
+      return { accepted, line: conflictLine(context(npcId)) ?? '사과할 일은 없어요.' };
+    },
     talk(id: string, npcId: string, choice: DialogueChoice) {
       requirePresent(npcId);
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
@@ -391,8 +402,11 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (state.relationMode === 'bonds' && state.bonds.applied.includes(id)) throw Error('Duplicate bond event');
       if (!id || state.dialogue.memories[npcId]?.entries.some(m => m.id === id)) throw Error('Invalid or duplicate gift event');
       const ctx = context(npcId), entry = giveGift(state.shop, state.world, state.relationships, 'player', ctx.npc, itemId, ctx.time);
-      const line = recordDialogue(state.dialogue, id, ctx.npc, entry, ctx);
+      let line = recordDialogue(state.dialogue, id, ctx.npc, entry, ctx);
       if (state.relationMode === 'bonds') applyBondEvent(state.bonds, id, entry.time, [reactionEffect(entry)]);
+      if (state.relationMode === 'bonds' && !ctx.npc.dislikes.includes(entry.choice.topic)
+        && ctx.npc.likes.includes(entry.choice.topic) && reconcileBond(state.bonds, npcId, 'player', ctx.time))
+        line = conflictLine(context(npcId))!;
       publish(id, npcId, entry.choice.topic, entry.change < 0 ? 'hurt' : 'help'); return { entry, line };
     },
     confess(id: string, npcId: string, consent: Consent) {

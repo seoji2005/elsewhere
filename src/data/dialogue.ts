@@ -5,6 +5,12 @@ export interface DialogueTemplate {
   greeting: string; familiar: string; chat: string; repeat: string;
   gift: string; dislikedGift: string; accept: string; refuse: string;
 }
+export const conflictTemplates = {
+  polite: { hurt: '아직은 조금 서먹해요. 그 일에 대해 이야기하고 싶어요.',
+    reconciled: '마음을 전해 줘서 고마워요. 전보다 더 믿고 편히 곁에 있을 수 있겠어요.' },
+  casual: { hurt: '아직은 좀 서먹해. 그 일에 대해 이야기하고 싶어.',
+    reconciled: '마음을 전해 줘서 고마워. 전보다 더 믿고 편히 곁에 있을 수 있겠어.' },
+} as const;
 export const sharedMemoryTemplates = {
   quiet: { meal: '{place}에서 함께 먹은 {activity}, 아직 여운이 남아 있어요.',
     'shared-work': '{place}에서 함께 한 {activity}, 그때의 손길이 생각나요.' },
