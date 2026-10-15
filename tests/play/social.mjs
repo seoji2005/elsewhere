@@ -9,7 +9,7 @@ const errors = [];
 const deadline = setTimeout(() => {
   expired = true;
   void browser?.close();
-}, 120_000); // server SwiftShader: one reload of the 9MB build takes ~8-11s
+}, 300_000); // SwiftShader needs time for the dialogue camera to enter and return at 1–2 fps.
 try {
   browser = await chromium.launch({ timeout: 15_000,
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -67,23 +67,35 @@ try {
   assert.equal(await feelings.getByRole('button', { name: '친구', exact: true }).getAttribute('aria-pressed'), 'false');
 
   step = '이야기하기: 클로즈업 대사 창, 선택지, 결과 대사, 그만으로 복귀';
+  page.setDefaultTimeout(60_000); // include locator actions and both camera transitions on the server
   const who = (await relationship.innerText()).split(' · ')[0];
+  const orbit = await page.evaluate(() => window.cornerDiagnostics().camera);
   await panel.getByRole('button', { name: '이야기하기', exact: true }).tap();
   const talk = page.locator('.talk'), line = talk.locator('.talk-text'), choices = talk.locator('.talk-choices button');
   await talk.waitFor();
   assert.equal(await panel.isVisible(), false, '대화 중에는 결폰 패널이 숨겨져야 함');
   assert.ok((await talk.locator('.talk-name').innerText()).startsWith(who), '대사 창 이름표에 주민 이름이 보여야 함');
-  await choices.first().waitFor({ timeout: 30_000 }); // choices appear once the line has finished typing (avatar load first)
+  await talk.locator('.talk-box').tap(); // typing can be completed with one tap
+  await choices.first().waitFor();
   const opening = (await line.innerText()).trim();
   assert.ok(opening, '대사 창의 첫 대사가 비어 있지 않아야 함');
   const count = await choices.count();
   assert.ok(count >= 3 && count <= 5, `선택지는 주제 2~4개와 그만이어야 함 (${count}개)`);
   assert.equal(await choices.last().innerText(), '그만', '마지막 선택지는 그만이어야 함');
+  for (const button of await choices.all()) {
+    const bounds = await button.boundingBox();
+    assert.ok(bounds && bounds.height >= 44 && bounds.y >= 0 && bounds.y + bounds.height <= 393,
+      '가로 폰에서 선택지가 화면 안에 있고 터치 높이 44px 이상이어야 함');
+  }
   await choices.first().tap();
-  await choices.first().waitFor();
+  await talk.locator('.talk-box').tap(); // complete the reply, then tap again to continue
+  await talk.locator('.talk-box[data-next="탭해서 계속"]').waitFor();
+  assert.equal(await talk.locator('.talk-choices').isVisible(), false, '결과 대사를 읽는 동안 선택지는 숨겨져야 함');
   const nextLine = (await line.innerText()).trim();
   assert.ok(nextLine, '이야기 뒤에도 대사가 비어 있지 않아야 함');
   assert.notEqual(nextLine, opening, '주제를 고르면 첫 대사에서 응답 대사로 바뀌어야 함');
+  await talk.locator('.talk-box').tap();
+  await choices.first().waitFor();
   await page.waitForFunction(() => { // the camera has eased in next to the resident, not 8 m behind the player
     const { camera, player } = window.cornerDiagnostics();
     return Math.hypot(camera[0] - player[0], camera[2] - player[2]) < 3;
@@ -94,8 +106,15 @@ try {
   const afterRelationship = await bondScores.innerText();
   assert.match(afterRelationship, /^호감 -?\d+ · 신뢰 -?\d+$/, '이야기 뒤에도 호감과 신뢰 숫자가 표시되어야 함');
   assert.notEqual(afterRelationship, beforeRelationship, '이야기 뒤 친밀도 표시가 바뀌어야 함');
+  await page.waitForFunction(before => window.cornerDiagnostics().camera.every((value, i) => Math.abs(value - before[i]) < 0.15), orbit);
+  await panel.getByRole('button', { name: '이야기하기', exact: true }).tap();
+  await talk.waitFor();
+  await talk.tap({ position: { x: 20, y: 20 } });
+  await talk.waitFor({ state: 'hidden' });
+  assert.ok(await panel.isVisible(), '바깥 탭으로 종료해도 결폰으로 돌아와야 함');
 
   step = '찻방 이동: 일·소비에 잔향 차 판매 표시';
+  page.setDefaultTimeout(10_000);
   await page.getByRole('button', { name: '결증·장소', exact: true }).tap();
   await panel.getByRole('button', { name: '잔물결 찻방', exact: true }).tap();
   assert.equal(await status.nth(1).innerText(), '잔물결 찻방', '현재 장소가 찻방이어야 함');
@@ -148,7 +167,7 @@ try {
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');
   console.log('Play: 결폰 → 내 마음 선택 → 주민 대화·호감 변경 → 잔향 차 구매 → 사용·활력 증가 PASS');
 } catch (error) {
-  console.error(`Play social [${step}] FAIL${expired ? ' (전체 60초 초과)' : ''}: ${error.message}`);
+  console.error(`Play social [${step}] FAIL${expired ? ' (전체 300초 초과)' : ''}: ${error.message}`);
   if (errors.length) console.error(errors.join('\n'));
   process.exitCode = 1;
 } finally {

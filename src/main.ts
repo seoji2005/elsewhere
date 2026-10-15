@@ -216,7 +216,7 @@ let previous = performance.now(), positionElapsed = 0, status = { speed: 0, near
 renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
-  status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : talk.active() ? { x: 0, y: 0 } : controls.stickInput(),
+  status = follow(Math.min(dt, 0.1), talk.active() ? { x: 0, y: 0 } : move ? { x: 0, y: move } : controls.stickInput(),
     controls.state, talk.closeup());
   talk.update(dt);
   character.update(status.speed, Math.min(dt, 0.1));
