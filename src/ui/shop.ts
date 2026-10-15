@@ -10,7 +10,7 @@ import { weatherFor } from '../sim/weather';
 import type { createSession, DayReport } from '../game/session';
 import type { PatronState } from '../game/tycoon/patrons';
 import { personas } from '../data/personas';
-import { carried, dropAtShop, pickupOrder, pickupProblem, type HaulState } from '../game/tycoon/haul';
+import { carried, dropAtShop, pickupOrder, pickupProblem, PICKUP_HOURS, type HaulState } from '../game/tycoon/haul';
 import { canNegotiate, currentDraft, findingsOf, negotiate, requestReview, reviewFee, risks, type CounselState, type Draft } from '../game/tycoon/counsel';
 import { reviewDays } from '../sim/advisors';
 import { adChannels, adMessages, adModels, segmentNames, segments } from '../data/ads';
@@ -32,6 +32,7 @@ export interface ShopUi {
   title: (text: string) => HTMLElement; note: (text: string) => HTMLElement;
   live: (element: Node, text: () => string) => Node;
   contacts: () => Npc[]; stage: (npc: Npc) => string; placeName: (id: string) => string;
+  say: (text: string, action?: [string, () => void]) => void; visit: (placeId: string) => void;
 }
 const kindNames: Record<ShopKind, string> = { tea: '찻집', general: '잡화점' };
 const weathers = { sunny: ['☀', '맑음'], cloudy: ['☁', '흐림'], rain: ['☂', '비'] } as const;
@@ -56,6 +57,11 @@ const reachNames = { neighborhood: '동네', city: '도시 전체', national: '�
 const promiseNotes: Record<string, string> = { price: '값이 싸야 약속을 지켜요', speed: '줄이 짧아야 약속을 지켜요',
   quality: '품절이 적어야 약속을 지켜요', emotion: '지킬 약속이 없어요', buzz: '눈길은 끌지만 과열될 수 있어요' };
 const pct = (p: number) => `${Math.round(p * 100)}%`;
+/** 받침에 따라 조사를 고른다: josa('전단지', '은', '는') → '는'. */
+export const josa = (word: string, withFinal: string, without: string) => {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return code >= 0 && code <= 11171 && code % 28 ? withFinal : without;
+};
 const nameIn = (list: readonly { id: string; name: string }[], id?: string) => list.find(x => x.id === id)?.name ?? '';
 
 // Status-bar extras: today's weather glyph and the latest lease's arrears warning.
@@ -88,9 +94,21 @@ function answer(state: State, npc: Npc, reason: string) {
   return `${npc.name}: “${text}”`;
 }
 
+// C112 ⑦: the one next thing to do, following the player's progress (lease → shop → stock → staff).
+function nextStep(state: State) {
+  const lease = activeLease(state), b = playerShop(state);
+  if (!lease) return '빈 점포를 계약해 보세요';
+  if (!b) return '업종을 골라 문을 열어 보세요';
+  if (carried(haulOf(state))) return '들고 있는 상자를 가게 뒷방에 내려놓으세요';
+  if (!b.store.stock.some(s => s.displayed + s.backroom) && !lease.orders.some(o => !o.delivered)) return '생산자에게 가서 상자를 받아 오세요';
+  if (!staff(state, b.id).length) return '직원을 구해 보세요 · 직원이 있어야 손님을 받아요';
+  return '';
+}
 export function shopTab(session: Session, ui: ShopUi) {
   const { state } = session, { make, button, row, title, note, live, body } = ui;
   const lease = activeLease(state), b = playerShop(state), last = state.leases.at(-1);
+  const next = nextStep(state);
+  if (next && !policy && !ui.hiring && adStep < 0) make('hud-now hud-next', body, 'div', `다음 할 일 · ${next}`);
   if (!lease) {
     if (last?.warning === 'shop.closed.arrears') note('연체가 사흘 이어져 가게 문을 닫았어요. 남은 빚은 계속 갚아야 해요.');
     const counsel = counselOf(state);
@@ -115,14 +133,18 @@ export function shopTab(session: Session, ui: ShopUi) {
     return;
   }
   const cmd = <T>(fn: (c: ReturnType<Session['tycoon']['ctx']>, s: StaffState) => T) => session.tycoon.command('staff', fn), st = staffOf(state);
-  if (policy) { // C097: five policies on one screen, the recommendation applied in one tap
-    title('직원에게 맡길 정책 · 눌러서 바꾸기');
-    for (const r of policyRows) button(row(r.label, () => r.show(st.policy[r.key] as never)), '바꾸기', () => cmd((_, s) => setPolicy(s,
-      { [r.key]: r.values[(r.values.indexOf(s.policy[r.key]) + 1) % r.values.length] })));
-    note('정책 안의 일은 직원이 혼자 하고, 밖의 일만 물어봐요. 이미 한 발주는 그대로예요.');
-    const chips = make('hud-chips', body);
-    button(chips, '추천값 한 번에 적용', () => cmd((_, s) => setPolicy(s, { ...recommendedPolicy, version: undefined } as never)));
-    return button(chips, '맡기기', () => { cmd((_, s) => setPolicy(s, {})); policy = false; });
+  if (policy) { // C097 → C112: one button with the recommendation; the five policies only when unfolded (GDD 원칙 6)
+    title('직원에게 가게를 맡길까요?');
+    note('정해 둔 만큼은 직원이 혼자 하고, 그 밖의 일만 물어봐요.');
+    button(make('hud-chips', body), '추천값으로 맡기기', () => {
+      cmd((_, s) => setPolicy(s, { ...recommendedPolicy, version: undefined } as never)); cmd((_, s) => setPolicy(s, {})); policy = false;
+      return '추천값으로 맡겼어요';
+    });
+    const box = make('hud-note', body, 'details');
+    make('', box, 'summary', '세부 정하기');
+    for (const r of policyRows) box.append(button(row(r.label, () => r.show(st.policy[r.key] as never)), '바꾸기', () => cmd((_, s) => setPolicy(s,
+      { [r.key]: r.values[(r.values.indexOf(s.policy[r.key]) + 1) % r.values.length] }))).parentElement!);
+    return button(make('hud-chips', box), '이대로 맡기기', () => { cmd((_, s) => setPolicy(s, {})); policy = false; });
   }
   if (ui.hiring) return hireView(b.id);
   if (adStep >= 0) return adView();
@@ -154,8 +176,8 @@ export function shopTab(session: Session, ui: ShopUi) {
     title(`광고 · 광고 평판 ${signed(adState.reputation)}`);
     for (const c of adState.campaigns.slice(-3)) row(`${nameIn(adChannels, c.channelId)} · ${c.targets.map(t => segmentNames[t]).join('·')}`, () => {
       const left = c.startDay + c.result.curve.indexOf(0, adChannels.find(ch => ch.id === c.channelId)!.leadDays) - day();
-      return `${!c.revealed ? '준비 중' : c.result.summary}${c.broken ? `\n⚠ ${c.broken}` : ''}`
-        + `\n${running(c, day()) ? `여운 포함 ${left}일 남음 · ` : '끝남 · '}광고 보고 왔다는 손님 ${c.seen}명`;
+      const phase = !c.revealed ? '준비 중' : running(c, day()) ? `여운 포함 ${left}일 남음` : '끝남'; // one state only (C112)
+      return `${phase}${c.revealed ? `\n${c.result.summary}` : ''}${c.broken ? `\n⚠ ${c.broken}` : ''}\n광고 보고 왔다는 손님 ${c.seen}명`;
     });
     button(make('hud-chips', body), '광고 내기', () => { adStep = 0; adMore = false; adDraft = {}; });
   }
@@ -175,21 +197,28 @@ export function shopTab(session: Session, ui: ShopUi) {
       + `\n원가 ${unitCost(s.itemId)}결 · 판매가 ${s.price}결`);
     button(line, '−', () => session.setShopPrice(s.itemId, s.price - 1), () => s.price <= 1).setAttribute('aria-label', `${itemName(s.itemId)} 값 내리기`);
     button(line, '+', () => session.setShopPrice(s.itemId, s.price + 1)).setAttribute('aria-label', `${itemName(s.itemId)} 값 올리기`);
-    const fee = session.deliveryCost(s.itemId, 5), here = !!supplier && state.player.placeId === where(), order = make('hud-chips', body);
+    const fee = session.deliveryCost(s.itemId, 5), here = () => !!supplier && state.player.placeId === where(), order = make('hud-chips', body);
+    const closed = () => { const h = gameTime(state.world.clock).hour; return h < PICKUP_HOURS[0] || h >= PICKUP_HOURS[1]; };
     if (supplier) live(make('hud-sub', order, 'span'), () => `주문 5 = 배달 (배달비 ${fee}결 · 내일)\n생산자 ${supplier.name} · 지금 ${ui.placeName(where())} (07–19시)`);
     button(line, '주문 5', () => {
       const result = session.orderStock(supplier!.id, s.itemId, 5);
       if (!result.ok) throw Error(result.error);
       return `${itemName(s.itemId)} 5개 배달 주문 (-${5 * unitCost(s.itemId) + fee}결, 배달비 ${fee}결) · 내일 입고`;
     }, !supplier);
-    button(order, here ? '상자 받기 5 · 지금' : '직접 가지러 가기 · 배달비 0', () => {
+    const pick = button(order, '', () => {
       const problem = pickupProblem(session.tycoon.ctx(), haulOf(state), supplier!.id, s.itemId, 5);
-      if (problem === 'Producer elsewhere') return `${supplier!.name} 님은 지금 ${ui.placeName(where())}에 있어요 · 가서 받으면 배달비 0`;
+      if (problem === 'Producer elsewhere') return ui.say(`${supplier!.name} 님은 지금 ${ui.placeName(where())}에 있어요 · 가서 받으면 배달비 0`,
+        [`${supplier!.name}에게 가기`, () => ui.visit(where())]);
       if (problem) return { 'Producer closed': '생산자는 07–19시에만 내줘요', 'Too much to carry': '상자는 12개까지만 들 수 있어요' }[problem] ?? '지금은 받을 수 없어요';
       const result = session.tycoon.command('haul', (ctx, h: HaulState) => pickupOrder(ctx, h, supplier!.id, s.itemId, 5));
       if (!result.ok) throw Error(result.error);
       return `${itemName(s.itemId)} 상자 5개를 받았어요 (-${5 * unitCost(s.itemId)}결) · 가게 뒷방에 내려놓으세요`;
-    }, !supplier);
+    }, () => !supplier || closed()); // C112 ⑥: off outside the producer's hours
+    live(pick, () => closed() ? `${String(PICKUP_HOURS[0]).padStart(2, '0')}시부터` : here() ? '상자 받기 5 · 지금' : '직접 가지러 가기 · 배달비 0');
+    if (supplier) { // C112 ⑧: one tap to the producer, the same move as 장소 이동
+      const visit = button(order, `${supplier.name}에게 가기`, () => ui.visit(where()), here);
+      live(visit, () => here() ? `${supplier.name} 앞이에요` : `${supplier.name}에게 가기`);
+    }
   }
   const employees = staff(state, b.id);
   title(`직원 ${employees.length}/${b.capacity}`);
@@ -204,7 +233,7 @@ export function shopTab(session: Session, ui: ShopUi) {
     const open = st.requests.filter(r => r.status === 'open').slice(0, 3), rep = closingReport(st, day()), npcName = (id: string) => ui.residents.find(n => n.id === id)?.name ?? id;
     live(note(''), () => `${onDuty(session.tycoon.ctx(), st).length ? '근무 중' : '근무 밖'} · 혼자 완료 ${st.outcomes.filter(o => o.alone && Math.floor(o.end / 1440) === day() - 1).length}건 · 답변 필요 ${st.requests.filter(r => r.status === 'open').length}건`);
     for (const r of open) {
-      const line = (row(r.kind === 'order' ? `${itemName(r.itemId)} ${r.qty}개 보충에 ${r.amount}결이 필요해요` : `${itemName(r.itemId)}을 ${r.amount}결에 달래요`,
+      const line = (row(r.kind === 'order' ? `${itemName(r.itemId)} ${r.qty}개 보충에 ${r.amount}결이 필요해요` : `${itemName(r.itemId)}${josa(itemName(r.itemId), '을', '를')} ${r.amount}결에 달래요`,
         r.kind === 'order' ? `${{ limit: '건당 한도', budget: '오늘 예산', funds: '가용액' }[r.ref]}을 넘어요 · ${hhmm(r.until % 1440)}까지` : `할인 권한 밖이에요 · 답이 없으면 안 깎아요`), make('hud-chips', body));
       button(line, '이번만 승인', () => cmd((c, s) => reply97(c, s, r.id, true)) ? '승인했어요' : '조건이 바뀌어 하지 못했어요');
       button(line, '정책 수정', () => { policy = true; }); button(line, '거절', () => { cmd((c, s) => reply97(c, s, r.id, false)); });
@@ -229,13 +258,13 @@ export function shopTab(session: Session, ui: ShopUi) {
   function contract(counsel: CounselState, d: Draft, u: typeof storefronts[number]) {
     const lawyer = counsel.experts.find(e => e.kind === 'lawyer')!, name = ui.residents.find(n => n.id === lawyer.npcId)?.name ?? '변호사';
     const review = d.reviews.find(r => r.advisorId === lawyer.id), findings = findingsOf(d);
-    for (const a of d.articles) {
+    for (const [i, a] of d.articles.entries()) { // C112: shown numbers run 1, 2, 3… (the stored article id may skip)
       const gone = d.removed.includes(a.article), f = findings.find(f => f.clause.article === a.article);
-      const line = row(`제${a.article}조${gone ? ' · 빼기로 함' : ''}`, a.text + (f && !gone ? `\n⚠ 위험: ${risks[f.clause.kind]}`
+      const line = row(`제${i + 1}조${gone ? ' · 빼기로 함' : ''}`, a.text + (f && !gone ? `\n⚠ 위험: ${risks[f.clause.kind]}`
         + `\n수정안: ${f.fix ?? (f.negotiable ? '이 조항을 빼 달라고 하기' : '빼기 어려움')}` : ''));
       if (a.kind && !gone) button(line, '빼 달라고 하기', () => {
         session.tycoon.command('counsel', (c, s: CounselState) => negotiate(c, s, d.id, a.article));
-        return `제${a.article}조를 빼기로 했어요 · 하루 임대료 +1결`;
+        return `제${i + 1}조를 빼기로 했어요 · 하루 임대료 +1결`;
       }, !canNegotiate(d, a.article));
     }
     if (d.extraRent) note(`조항을 뺀 대가로 하루 임대료 +${d.extraRent}결`);
@@ -260,7 +289,8 @@ export function shopTab(session: Session, ui: ShopUi) {
     if (adStep === 0) pickOne('어디에 낼까요?', adChannels.map(ch => [ch.name, `${reachNames[ch.reach]}에 닿아요${ch.leadDays ? ` · ${ch.leadDays}일 뒤 시작` : ' · 바로 시작'}`,
       () => { adDraft.channelId = ch.id; }]));
     if (adStep === 1) pickOne('누구에게 보일까요?', segments.map(g => [segmentNames[g],
-      `${nameIn(adChannels, adDraft.channelId)}${adChannels.find(ch => ch.id === adDraft.channelId)!.fit[g] >= 0.8 ? '에 잘 닿는 손님' : '은 덜 닿아요'}`,
+      `${nameIn(adChannels, adDraft.channelId)}${adChannels.find(ch => ch.id === adDraft.channelId)!.fit[g] >= 0.8 ? '에 잘 닿는 손님'
+        : `${josa(nameIn(adChannels, adDraft.channelId), '은', '는')} 덜 닿아요`}`,
       () => { adDraft.targets = [g]; }]));
     if (adStep === 2) pickOne(`${segmentNames[target!]}에게 무엇을 말할까요?`, adMessages.map(m => [m.name, promiseNotes[m.id], () => { adDraft.messageId = m.id; }]));
     if (adStep === 3) pickOne('누가 광고에 나올까요?', adModels.map(m => [m.name, m.id === 'none' ? '가게만 보여 줘요'
@@ -296,7 +326,9 @@ export function shopTab(session: Session, ui: ShopUi) {
     if (t?.status === 'running' || t?.status === 'done') { // C097: trial result → hire on these terms
       const name = ui.residents.find(n => n.id === t.npcId)?.name, line = row(`${name} · 시험 근무${t.status === 'running' ? ' 중' : ' 결과'}`, () =>
         t.checkouts + t.stocked ? `계산 ${t.checkouts}건 · 진열 ${t.stocked}개 · 60분` : '아직 관찰할 업무가 없어요');
-      if (t.status === 'done') button(line, '이 조건으로 채용', () => { if (!cmd(hireTrial)) return '지금은 채용할 수 없어요'; policy = true; ui.hire(false); });
+      // C112 ⑤: the button names the wage actually hired at; a different 제안 시급 gets its one-line reason.
+      if (t.status === 'done') button(line, `시급 ${t.wage}결로 채용`, () => { if (!cmd(hireTrial)) return '지금은 채용할 수 없어요'; policy = true; ui.hire(false); });
+      if (t.status === 'done' && t.wage !== wage) note(`시험 근무한 ${name} 님은 희망 시급 ${t.wage}결로 채용돼요 · 제안 시급 ${wage}결은 아는 주민에게 제안할 때 써요`);
       return t.status === 'done' && button(line, '다음에', () => { cmd((_, s) => { s.trial!.status = 'ended'; }); });
     }
     title('지원자 · 한 시간 유급 시험 근무');

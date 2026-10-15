@@ -92,6 +92,7 @@ if (blob) {
 const trialMode = query.get('trial') === '1';
 const session = trialMode ? createSession(trialStorage(localStorageAdapter()), trial.seed, undefined, NEW_GAME_SPEED, true)
   : createSession(localStorageAdapter(), undefined, undefined, NEW_GAME_SPEED);
+const newGame = session.state.world.clock.totalMinutes === 0; // C112 ⑦: a new game (trial too) opens the 결폰 on 내 가게
 const fresh = trialMode && prepareTrial(session);
 const player = session.state.player;
 character.group.position.set(player.x, 0, player.z);
@@ -120,6 +121,7 @@ const ui = hud(session, residents, {
   },
 });
 if (!session.loadResult.ok) ui.say('저장이 손상돼 새로 시작했어요');
+if (newGame) ui.home();
 if (fresh) ui.open('', 'shop'); // the new trial starts at the shop's door
 buildTag();
 const guide = fresh ? intro() : undefined;
