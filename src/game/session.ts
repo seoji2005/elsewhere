@@ -842,7 +842,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     const clock = state.world.clock, { minutesPerSecond, paused } = clock;
     if (minute > clock.totalMinutes) {
       Object.assign(clock, { minutesPerSecond: 1, paused: false });
-      try { tick(minute - clock.totalMinutes + 1e-6); clock.totalMinutes = minute; } // epsilon: float sums must reach the minute
+      // one minute per tick so end-of-tick work (messenger replies, places) happens at its own minute (Codex review C094)
+      try { while (clock.totalMinutes < minute) tick(Math.min(1, minute - clock.totalMinutes) + 1e-9); clock.totalMinutes = minute; }
       finally { Object.assign(clock, { minutesPerSecond, paused }); }
     }
     return saveNow();
