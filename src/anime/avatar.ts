@@ -170,18 +170,32 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   hips.position.y += 0.1; vrm.humanoid.update(); vrm.scene.updateMatrixWorld(true);
   const lift = (y('leftUpperLeg') - hipY) / 0.1; // world metres per normalized hips unit
   hips.position.y = restHips; vrm.humanoid.update();
-  const seats = new Map<number, T.AnimationAction | undefined>(), seated = (seat: number) => {
+  // The UAL clips sit back ~25 cm onto a chair scaled to the legs: act('sit') steps the group forward by that much, and
+  // the seated hips are raised or lowered to this seat's height (standing frames keep theirs).
+  const hipsOf = (clip: T.AnimationClip) => clip.tracks.find(track => track.name.endsWith('.position'))!.values;
+  const sitSource = named('Sitting_Idle_Loop'), [standY, standZ] = hipsOf(base).slice(1, 3);
+  const [sitY, sitZ] = sitSource ? hipsOf(retarget(sitSource, rig, vrm, scale, hipsOffset)).slice(1, 3) : [standY, standZ];
+  const seats = new Map<number, (T.AnimationAction | undefined)[]>(), seated = (seat: number) => {
     if (!seats.has(seat)) {
       const length = hipY - kneeY, joint = seat + 0.09 * bodyScale, down = Math.asin(T.MathUtils.clamp((joint - kneeY) / length, -0.3, 0.5));
-      const bend = Math.PI / 2 - down, ahead = Math.max(0, 0.16 - length * Math.cos(down));
+      const bend = Math.PI / 2 - down, ahead = Math.max(0, 0.16 - length * Math.cos(down)), target = restHips + (joint - hipY) / lift;
       const thigh = (r: T.Quaternion) => r.copy(turn(-bend)), shin = (r: T.Quaternion) => r.copy(turn(bend));
-      seats.set(seat, clip('Sitting_Idle_Loop', () => standIn('Sitting_Idle_Loop', { leftUpperLeg: thigh, rightUpperLeg: thigh,
-        leftLowerLeg: shin, rightLowerLeg: shin, leftFoot: r => r.identity(), rightFoot: r => r.identity(),
-        leftUpperArm: arms(0.5), rightUpperArm: arms(0.5) }, [restHips + (joint - hipY) / lift, ahead / lift])));
+      const fit = (name: string, once = false) => {
+        const source = named(name), made = source && retarget(source, rig, vrm, scale, hipsOffset);
+        if (!made) return;
+        const values = hipsOf(made);
+        for (let i = 0; i < values.length; i += 3) {
+          values[i + 1] += (target - sitY) * T.MathUtils.clamp((standY - values[i + 1]) / (standY - sitY), 0, 1);
+        }
+        return action(made, once);
+      };
+      seats.set(seat, [fit('Sitting_Enter', true), fit('Sitting_Idle_Loop') ?? action(standIn('Sitting_Idle_Loop', {
+        leftUpperLeg: thigh, rightUpperLeg: thigh, leftLowerLeg: shin, rightLowerLeg: shin, leftFoot: r => r.identity(),
+        rightFoot: r => r.identity(), leftUpperArm: arms(0.5), rightUpperArm: arms(0.5) }, [target, ahead / lift])),
+      fit('Sitting_Exit', true)]);
     }
-    return seats.get(seat);
+    return seats.get(seat)!;
   };
-  const enter = clip('Sitting_Enter', undefined, true), exit = clip('Sitting_Exit', undefined, true);
   const buy = clip('Interact', () => standIn('Interact', {
     rightUpperArm: (r, t) => r.premultiply(turn(-1.2 * Math.sin(Math.PI * t) ** 2)) }));
   const talk = clip('Idle_Talking_Loop', () => standIn('Idle_Talking_Loop', { leftUpperArm: arms(0.15),
@@ -189,19 +203,21 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
     neck: (r, t) => r.premultiply(turn(0.06 * Math.sin(2 * Math.PI * t))) }));
   type Activity = 'stand' | 'sit' | 'talk' | 'buy';
   const FADE = 0.6; // s, between activities and into a following clip
-  let activity: Activity = 'stand', steps: T.AnimationAction[] = [], mouth = 0;
+  let activity: Activity = 'stand', steps: T.AnimationAction[] = [], leave: T.AnimationAction | undefined, mouth = 0;
   const begin = () => { if (steps[0] && steps[0].weight < 0.01) steps[0].reset(); };
   if (vrm.lookAt) vrm.lookAt.target = camera;
   const group = new T.Group().add(vrm.scene), face = vrm.expressionManager;
   group.name = outfit.name;
   let time = phase, blinkAt = phase + 1.5 + phase * 0.3, smileAt = 3, first = true;
   return { group, focusHeight, activity: () => activity,
-    // seat: seat top above the feet' ground (m). Leaving a seat plays Sitting_Exit first when present.
+    // sit: the group stands on the seat spot; seat is the seat top above the feet' ground (m). Leaving a seat plays
+    // Sitting_Exit first when present and ends standing in front of it.
     act(next: Activity, seat = 0.43) {
       if (next === activity) return;
-      steps = [...activity === 'sit' && exit ? [exit] : [],
-        ...[next === 'sit' && enter, next === 'sit' && seated(seat), next === 'talk' && talk, next === 'buy' && buy]
-          .filter((step): step is T.AnimationAction => !!step)];
+      const [enter, loop, exit] = next === 'sit' ? seated(seat) : [];
+      steps = [leave, enter, loop, next === 'talk' && talk, next === 'buy' && buy].filter((step): step is T.AnimationAction => !!step);
+      leave = exit;
+      if (next === 'sit') group.translateZ(Math.abs(sitZ - standZ) * lift);
       if (first && (steps = steps.slice(-1))[0]) { // placed at load: already there, each at its own point of the loop
         steps[0].weight = 1; steps[0].time = phase % steps[0].getClip().duration;
       }
