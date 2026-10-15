@@ -65,6 +65,15 @@ describe('ads', () => {
     }
   }, 60_000);
 
+  it('previews outcome chances that match 100k samples with a model and hype', () => {
+    const plan = planCampaign(input({ channelId: 'sns', messageId: 'buzz', modelId: 'influencer', weeks: 4 })), next = rng(11);
+    const count = { hit: 0, normal: 0, dud: 0, backlash: 0 };
+    for (let i = 0; i < 100_000; i++) count[resolveCampaign(plan, elderShop, draws(next)).outcome]++;
+    expect(count.hit / 1e5).toBeCloseTo(plan.hitChance, 2);
+    expect(count.dud / 1e5).toBeCloseTo(plan.dudChance, 2);
+    expect(count.backlash / 1e5).toBeCloseTo(plan.backlashChance, 2);
+  }, 30_000);
+
   it('runs after lead days and fades to nothing after the campaign', () => {
     const plan = planCampaign(input({ weeks: 1 })), r = resolveCampaign(plan, elderShop, [0.5, 0.5, 0.5, 0.5, 0]);
     const lead = adChannels.find(c => c.id === 'flyer')!.leadDays, at = (day: number) => adEffectOnVisit([{ startDay: 10, result: r }], 'elders', day);

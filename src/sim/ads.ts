@@ -63,7 +63,7 @@ export function planCampaign(input: CampaignInput): CampaignPlan {
   const normal = 1 - p.hit - p.dud;
   return {
     ...input, targets: [...input.targets], cost: (channel.weeklyCost + model.weeklyFee) * input.weeks, leadDays: channel.leadDays,
-    hitChance: p.hit, dudChance: p.dud, backlashChance: p.backlash,
+    hitChance: p.hit * (1 - p.backlash), dudChance: p.dud * (1 - p.backlash), backlashChance: p.backlash,
     minLift: 0, maxLift: at(OUTCOME.hit[1]),
     expectedLift: (1 - p.backlash) * (p.hit * mid(OUTCOME.hit) + normal * mid(OUTCOME.normal) + p.dud * mid(OUTCOME.dud)),
   };
