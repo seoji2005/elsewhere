@@ -5,7 +5,9 @@ from gradio_client import Client, handle_file
 src, out = sys.argv[1], sys.argv[2]
 opt = json.load(open(".trellis.json")) if os.path.exists(".trellis.json") else {}
 os.makedirs(out, exist_ok=True)
-c = Client("microsoft/TRELLIS.2", hf_token=os.environ.get("HF_TOKEN") or None, verbose=False)
+tok = os.environ.get("HF_TOKEN") or None
+try: c = Client("microsoft/TRELLIS.2", token=tok, verbose=False)
+except TypeError: c = Client("microsoft/TRELLIS.2", hf_token=tok, verbose=False)
 t = time.time()
 try: c.predict(api_name="/start_session")
 except Exception as e: print("start_session:", str(e)[:120])
