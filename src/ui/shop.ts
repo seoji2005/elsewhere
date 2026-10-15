@@ -20,6 +20,7 @@ import type { SceneState } from '../game/tycoon/scene';
 import { fill, sceneLines } from '../data/shopScene';
 import { answer as reply97, applicants, baseOf, hireTrial, onDuty, report as closingReport, setPolicy, startTrial, type StaffState } from '../game/tycoon/staff';
 import { policyRows, recommendedPolicy } from '../data/staffPolicies';
+import { boardOf, type RivalState } from '../game/tycoon/rival';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -71,7 +72,7 @@ export function shopKey(state: State) {
     counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages,
     adsOf(state)?.campaigns.map(c => [c.id, c.revealed, c.broken]),
     !!(state.tycoon.systems.scene as SceneState | undefined)?.first,
-    staffOf(state) && [staffOf(state).trial?.status, staffOf(state).policy, staffOf(state).requests.filter(r => r.status === 'open').map(r => r.id), policy, proof]];
+    staffOf(state) && [staffOf(state).trial?.status, staffOf(state).policy, staffOf(state).requests.filter(r => r.status === 'open').map(r => r.id), policy, proof], (state.tycoon.systems.rival as RivalState | undefined)?.status];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
 const lines: Record<string, [string, string]> = {
@@ -140,6 +141,14 @@ export function shopTab(session: Session, ui: ShopUi) {
   live(make('shop-barks', body), () => ((session.tycoon.state().systems.patrons as PatronState | undefined)?.feed ?? [])
     .filter(l => Math.floor(l.minute / 1440) === Math.floor(state.world.clock.totalMinutes / 1440)).slice(-5)
     .map(l => `${hhmm(l.minute % 1440)} ${l.name}(${personas[l.personaId].name}) “${l.text}”`).join('\n') || '아직 손님 말이 없어요.');
+  // C099: 도렌 점포는 공개된 것만 — 직접 가 본 가격표(본 시각과 함께)와 붙은 공고·마주친 말.
+  const rv = state.tycoon.systems.rival as RivalState | undefined, rb = state.book.businesses.find(x => x.id === rv?.businessId);
+  if (rv && rb) {
+    title(`도렌 점포 · ${ui.placeName(rb.placeId)}${rv.status === 'closed' ? ' · 문 닫음' : rv.status === 'closing' ? ' · 정리 중' : ''}`);
+    row('가격표', () => state.player.placeId === rb.placeId ? `${boardOf(rb)}\n지금 보고 있어요` : rv.board
+      ? `${rv.board.text}\n${Math.floor(rv.board.minute / 1440) + 1}일째 ${hhmm(rv.board.minute % 1440)}에 본 값` : `${ui.placeName(rb.placeId)}에 가 보면 보여요`);
+    live(make('shop-barks', body), () => rv.news.slice(-2).map(n => `${hhmm(n.minute % 1440)} ${n.text}`).join('\n') || '아직 도렌 쪽 소식이 없어요.');
+  }
   const adState = adsOf(state);
   if (adState) {
     title(`광고 · 광고 평판 ${signed(adState.reputation)}`);
