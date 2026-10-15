@@ -14,7 +14,8 @@ import { restoreWorld } from '../sim/save';
 import { roll as tycoonRoll, settle as tycoonSettle, nextId as tycoonNextId } from '../sim/tycoonCore';
 import { tycoonSystems } from './tycoon/registry';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './tycoon/system';
-import { patrons, park, personaOf, choice, customerOf, type PatronState } from './tycoon/patrons';
+import { patrons, park, personaOf, choice, customerOf, answerHaggle, haggleMinutes, type PatronState } from './tycoon/patrons';
+import { stillWaiting } from '../sim/customer';
 import { decideWithPersona } from '../sim/persona';
 import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
 import { sign, type CounselState } from './tycoon/counsel';
@@ -46,6 +47,8 @@ import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60, NEW_GAME_SPEED = 2; // game minutes per real second (GDD §2)
 /** C107: the daily report with the day's tax, ad and parking-partner costs (older saves' reports lack them). */
 export type DayReport = ShopReport & { tax: number; ads: number; parking: number };
+/** C115: one customer in line at the player's counter; offer is set for a haggler. */
+export interface CounterLine { ref: string; npcId: string; itemId: string; price: number; offer?: number; minute: number }
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
 const businessProducerJobs: Readonly<Record<string, string>> = { ...producerJobs, lamp: '빛씨 조율사' };
 const personalEmployer: Record<string, string> = { cafe: 'nuel', shop: 'sori', market: 'aro' };
@@ -376,6 +379,9 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     if (!b) throw Error('Shop not opened');
     return b;
   };
+  let byHand = false; // C115: the boss stands at the counter (entered by the door); not saved, so a reload or headless sim serves automatically
+  const shiftOn = (businessId: string, minute: number) => state.book.employment.some(e => e.businessId === businessId && e.leftAt === null &&
+    state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute));
   const shops = {
     /** With a counsel contract id the lease is signed through it (C101); without one it stays a plain lease. */
     rentStore(storefrontId: string, contractId?: string) {
@@ -440,6 +446,32 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       if (!e) throw Error('Not employed');
       e.leftAt = minuteOf(now);
       applyBondEvent(state.bonds, `fire:${e.job.id}`, now, [{ fromId: npcId, toId: 'player', delta: { trust: -10, respect: -5 } }]); saveNow();
+    },
+    /** C115: the line at the player's counter, oldest first (waiting visits and hagglers); open = the boss rings it up by hand. */
+    counter() {
+      const lease = state.leases.find(l => !l.ended), b = state.book.businesses.find(b => b.id === lease?.businessId && b.closedAt === null);
+      if (!b) return { open: false, queue: [] as CounterLine[] };
+      const minute = Math.floor(state.world.clock.totalMinutes), staffState = state.tycoon.systems.staff as StaffState | undefined;
+      const pat = state.tycoon.systems.patrons as PatronState | undefined, list = (itemId: string) => b.store.stock.find(s => s.itemId === itemId)?.price ?? 0;
+      const queue: CounterLine[] = [...b.store.visits.filter(v => v.status === 'waiting' && stillWaiting(v.joinedMinute, v.patienceMinutes, minute))
+        .map(v => ({ ref: v.id, npcId: v.actorId, itemId: v.need.itemId, price: v.price, minute: v.joinedMinute })),
+      ...(pat?.haggles ?? []).filter(h => h.businessId === b.id).map(h => ({ ref: h.visitId, npcId: h.npcId, itemId: h.itemId, price: list(h.itemId), offer: h.offer, minute: h.minute }))];
+      if (state.player.placeId !== b.placeId) byHand = false;
+      return { open: byHand && state.player.placeId === b.placeId && !(staffState ? onDuty(ctx(), staffState).length : shiftOn(b.id, minute)),
+        queue: queue.sort((x, y) => x.minute - y.minute) };
+    },
+    /** C115: the boss serves the head of the line once — the C087 checkout, or the answer to a haggler (깎아 주기 / 정가). */
+    atCounter(on: boolean) { byHand = on; },
+    ringUp(ref: string, accept = true) {
+      const { open, queue } = shops.counter(), head = queue[0], b = playerShop(), now = gameTime(state.world.clock);
+      if (!open || head?.ref !== ref) throw Error('Not queue head');
+      if (head.offer !== undefined) return tycoon.command('patrons', (c, s: PatronState) => answerHaggle(c, s, ref, accept)) && accept;
+      const sale = checkoutBusiness(state.book, state.world.people, state.world.ledger, b.id, state.purses[head.npcId], ref, now);
+      if (!sale.ok || sale.duplicate) return false;
+      const life = state.shop.residents[head.npcId] ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+      life.inventory[head.itemId] = (life.inventory[head.itemId] ?? 0) + 1; useItem(state.shop, head.npcId, head.itemId);
+      if (systems.includes(patrons)) shopEvent({ npcId: head.npcId, businessId: b.id, itemId: head.itemId, price: head.price, count: 1, result: 'purchased' });
+      saveNow(); return true;
     },
     shopReport() { return state.leases.map(l => ({ leaseId: l.id, warning: l.warning, arrears: l.arrears, reports: l.reports })); },
   };
@@ -760,8 +792,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             if (npc.id === b.ownerId) continue;
             const staffState = b.ownerId === 'player' ? state.tycoon.systems.staff as StaffState | undefined : undefined, away = state.player.placeId !== b.placeId;
             const hands = staffState ? onDuty(ctx(), staffState).length : 0; // C110: staff at the counter take the intent as a checkout task
-            if (b.ownerId === 'player' && (employment || away && !(staffState ? hands : book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
-                state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute))))) continue;
+            const manned = staffState ? hands > 0 : shiftOn(b.id, minute), counter = byHand && b.ownerId === 'player' && !away && !manned;
+            if (b.ownerId === 'player' && (employment || away && !manned)) continue;
             if (staffState && inLine(staffState, `${b.id}:${now.day}:${npc.id}`)) continue; // still waiting at the counter
             const visitId = `${b.id}:${now.day}:${npc.id}${retail && b.ownerId !== 'player' ? `:${Math.floor(now.hour / 8)}` : ''}`;
             if (b.store.visits.some(v => v.id === visitId)) continue;
@@ -814,6 +846,11 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
             if (hands) { // C110 ①: paid once, when a staff (or the boss) checkout task ends
               takeOrder(ctx(), staffState!, { ref: visitId, npcId: npc.id, itemId: stock.itemId, maxPrice: need?.maxPrice ?? stock.price,
                 count: persona === 'bigSpender' ? personas.bigSpender.basket : 1 });
+              continue;
+            }
+            if (counter) { // C115: nobody on duty and the boss here: the customer waits in line for the boss's 계산 as long as a haggler does
+              restock(b.store, stock.itemId, 5);
+              visitStore(b.store, world.ledger, visitId, npc.id, need ?? { itemId: stock.itemId, maxPrice: stock.price }, haggleMinutes, now);
               continue;
             }
             restock(b.store, stock.itemId, 5);
@@ -933,6 +970,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   // Every skipped minute goes through tick, so deliveries, wages and expiries happen exactly as if played; then saves.
   const skipTo = (minute: number): SaveResult => {
     const clock = state.world.clock, { minutesPerSecond, paused } = clock;
+    byHand = false; // C115: skipped hours are served automatically
     if (minute > clock.totalMinutes) {
       Object.assign(clock, { minutesPerSecond: 1, paused: false });
       // one minute per tick so end-of-tick work (messenger replies, places) happens at its own minute (Codex review C094)
