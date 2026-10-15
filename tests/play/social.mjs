@@ -99,7 +99,7 @@ try {
   await choices.first().waitFor();
   await page.waitForFunction(() => { // the camera has eased in next to the resident, not 8 m behind the player
     const { camera, player } = window.cornerDiagnostics();
-    return Math.hypot(camera[0] - player[0], camera[2] - player[2]) < 3;
+    return Math.hypot(camera[0] - player[0], camera[2] - player[2]) < 5; // default orbit is ~10 m; a 1.6 m resident is framed from ~2 m
   }, null, { polling: 500 });
   await choices.last().tap();
   await talk.waitFor({ state: 'hidden' });
