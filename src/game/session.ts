@@ -21,6 +21,8 @@ import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from 
 import { sign, type CounselState } from './tycoon/counsel';
 import { emptyTycoon, createTycoon, restoreTycoon, runBeforeMinute, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { cityEvents } from './tycoon/cityEvents';
+import { rival, type RivalState } from './tycoon/rival';
+import { RIVAL } from '../data/rival';
 import { onSite, type CityState } from '../sim/cityEvents';
 import { roadworks } from '../data/cityEvents';
 import { whereIs, validateTime } from '../sim/npc';
@@ -99,7 +101,7 @@ function addResidents(state: ReturnType<typeof freshState>, allocate = false, op
 // Two paid five-unit batches: a full shelf and a reserve for the first night.
 function supplyDay(state: ReturnType<typeof freshState>, residents: ReturnType<typeof addResidents>) {
   const { world, book } = state, time = gameTime(world.clock);
-  for (const b of book.businesses) if (b.closedAt === null && b.ownerId !== 'player') for (const stock of b.store.stock) {
+  for (const b of book.businesses) if (b.closedAt === null && b.ownerId !== 'player' && b.ownerId !== RIVAL) for (const stock of b.store.stock) {
     let producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
     if (state.leases.some(l => !l.ended && l.businessId)) producer = residents
       .filter(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId])
@@ -342,6 +344,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   if (!tycoonReady) { state.tycoon = createTycoon(systems, ctx); state.world.clock.minutesPerSecond = newGameSpeed; } // saves keep their speed
   // C100: only a brand-new world gets the city's starting ledger (never an existing save), on its first minute.
   if (fresh && deliveryFees && systems.includes(cityEvents)) (state.tycoon.systems.cityEvents as CityState).prepare = true;
+  // C099: Doren's shop exists from the first minute of a brand-new world only (initial allocation); older saves keep him unavailable.
+  if (fresh && deliveryFees && systems.includes(rival)) (state.tycoon.systems.rival as RivalState).prepare = true;
   // C095 demand hooks, player's shop only (see TycoonSystem.visitBonus / onShopEvent).
   const visitBonus = (v: { npcId: string; businessId: string; hour: number }) =>
     Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
@@ -724,7 +728,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
           const place = staffPlace(npc, now), present = byPlace.get(place) ?? [];
           present.push(npc); byPlace.set(place, present); world.people[npc.id].placeId = place;
         }
-        for (const b of book.businesses) if (b.closedAt === null && b.openedAt <= minute) {
+        for (const b of book.businesses) if (b.closedAt === null && b.openedAt <= minute && b.ownerId !== RIVAL) { // C099: Doren serves his own intents
           expireVisits(b.store, now);
           for (const npc of byPlace.get(b.placeId) ?? []) {
             const employment = book.employment.find(e => e.businessId === b.id && e.actorId === npc.id && e.leftAt === null);
@@ -837,7 +841,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
           if (book.businesses.some(b => b.ownerId === 'player' && b.closedAt === null)) for (const npc of [...residents].sort((a, b) =>
               world.ledger.balances[a.id] - world.ledger.balances[b.id])) {
             if (book.employment.some(e => e.actorId === npc.id && e.leftAt === null)) continue;
-            const employer = book.businesses.find(b => b.ownerId !== 'player' && b.closedAt === null && b.ownerId !== npc.id &&
+            const employer = book.businesses.find(b => b.ownerId !== 'player' && b.ownerId !== RIVAL && b.closedAt === null && b.ownerId !== npc.id &&
               b.store.stock.some(s => businessProducerJobs[s.itemId] === npc.job));
             const slots = npc.schedule[(now.day - 2) % 7];
             if (!employer || !slots.some((s, i) => s.placeId === employer.placeId &&
