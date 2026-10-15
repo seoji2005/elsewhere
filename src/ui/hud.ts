@@ -46,7 +46,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const stick = make('stick'), knob = make('knob', stick);
   const enter = make('enter', document.body, 'button'), toast = make('toast');
   const top = make('hud-top'), status = make('hud-status', top);
-  const [timeText, placeText, cashText, energyText, weatherText, warnText] = [0, 1, 2, 3, 4, 5].map(() => make('', status, 'span'));
+  const [timeText, placeText, cashText, energyText, weatherText, warnText, loadText] = [0, 1, 2, 3, 4, 5, 6].map(() => make('', status, 'span'));
   warnText.className = 'hud-warn';
   weatherText.className = 'hud-weather';
   const pause = make('hud-pause', status, 'span', '멈춤'), skip = make('hud-open hud-skip', top, 'button', '다음 일까지 ▶▶');
@@ -313,8 +313,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     }
   }
   // C095: inside the player's own shop, customers' lines pop up as bubbles (2s each, queued) and hagglers wait for an answer.
-  const patronBox = make('patrons'), bubble = make('bark', patronBox), ask = make('haggle', patronBox);
-  bubble.hidden = ask.hidden = true;
+  const patronBox = make('patrons'), bubble = make('bark', patronBox), haggleBox = make('haggle', patronBox);
+  bubble.hidden = haggleBox.hidden = true;
   let heard = state.world.clock.totalMinutes, asked = '';
   const lines: string[] = [];
   const nextBark = () => {
@@ -329,15 +329,15 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     heard = Math.max(heard, ...(p?.feed ?? []).map(l => l.minute));
     if (bubble.hidden && lines.length) nextBark();
     const h = inside ? p!.haggles[0] : undefined;
-    ask.hidden = !h;
+    haggleBox.hidden = !h;
     if (!h || asked === h.visitId) return;
-    asked = h.visitId; ask.replaceChildren();
+    asked = h.visitId; haggleBox.replaceChildren();
     const name = residents.find(n => n.id === h.npcId)?.name ?? h.npcId, list = shop!.store.stock.find(s => s.itemId === h.itemId)?.price ?? 0;
     const said = [...p!.feed].reverse().find(l => l.npcId === h.npcId && l.situation === 'haggle')?.text ?? '조금 깎아 주세요.';
-    make('', ask, 'div', `${name}: “${said}”\n${items.find(i => i.id === h.itemId)?.name ?? h.itemId} ${list}결 → ${h.offer}결`);
+    make('', haggleBox, 'div', `${name}: “${said}”\n${items.find(i => i.id === h.itemId)?.name ?? h.itemId} ${list}결 → ${h.offer}결`);
     const reply = (accept: boolean) => () => { asked = ''; return session.tycoon.command('patrons', (c, s: PatronState) =>
       answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔지 못했어요' : `${name} 님이 그냥 갔어요`; };
-    button(make('haggle-btns', ask), '깎아 주기', reply(true)); button(ask.lastElementChild as HTMLElement, '안 돼요', reply(false));
+    button(make('haggle-btns', haggleBox), '깎아 주기', reply(true)); button(haggleBox.lastElementChild as HTMLElement, '안 돼요', reply(false));
   }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
@@ -351,6 +351,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     weatherText.textContent = shop.icon;
     weatherText.title = shop.name;
     warnText.textContent = shop.warning;
+    loadText.textContent = shop.load ? `📦×${shop.load}` : ''; // C096: boxes carried by hand
     pending ||= force;
     if (panel.hidden) return;
     const membership = tab === 'people'

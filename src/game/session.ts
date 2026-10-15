@@ -17,6 +17,7 @@ import { tycoonSystems } from './tycoon/registry';
 import type { ShopEvent, TycoonCtx, TycoonSystem } from './tycoon/system';
 import { patrons, park, personaOf, type PatronState } from './tycoon/patrons';
 import { applyPersona, decideWithPersona } from '../sim/persona';
+import { deliveryFee, speedFactor, unitCost, COURIER_JOB, type HaulState } from './tycoon/haul';
 import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
@@ -188,7 +189,9 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
         || n.mode === 'rumor' && [1, 2].includes(n.hops) && n.sourceId !== n.observerId && n.learned >= n.created + 60 * n.hops));
   }
 }
-export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems, newGameSpeed = 1) {
+// deliveryFees (C096): only a brand-new game charges delivery; seeded test sessions and older saves keep C087's numbers.
+export function createSession(storage: Storage, npcSeed?: number, systems: readonly TycoonSystem<any>[] = tycoonSystems,
+  newGameSpeed = 1, deliveryFees = npcSeed === undefined) {
   let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null, tycoonReady = false;
   const ctxFor = (t: TycoonState, people: readonly Npc[], time = gameTime(state.world.clock)): TycoonCtx => ({
     world: state.world, book: state.book, leases: state.leases, purses: state.purses, residents: people,
@@ -337,6 +340,8 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
   const visitBonus = (v: { npcId: string; businessId: string; hour: number }) =>
     Math.min(40, systems.reduce((n, sys) => n + (sys.visitBonus?.(ctx(), state.tycoon.systems[sys.id], v) ?? 0), 0));
   const shopEvent = (e: ShopEvent) => { for (const sys of systems) sys.onShopEvent?.(ctx(), state.tycoon.systems[sys.id], e); };
+  const haulState = () => state.tycoon.systems.haul as HaulState | undefined;
+  if (!tycoonReady && deliveryFees && haulState()) haulState()!.fee = true;
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
@@ -346,7 +351,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
       const people = Object.fromEntries(Object.entries(state.world.people).filter(([id]) => !id.startsWith('generated-')));
       // An empty tycoon container reads back identically from v5, so older builds can still open it.
-      const version = state.tycoon.seq || Object.keys(state.tycoon.systems).length ? 6 : 5;
+      const version = JSON.stringify(state.tycoon) === JSON.stringify(createTycoon(systems, ctx)) ? 5 : 6;
       storage.setItem(SESSION_KEY, JSON.stringify({ version, state: { ...state, world: { ...state.world, people } } }));
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };
@@ -386,11 +391,16 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const result = procure(state.book, state.world.people, state.world.ledger, b.id, producer, itemId,
         quantity, Math.max(1, Math.floor(item.price / 4)), id, now);
       if (result.ok && !result.duplicate) {
+        // C096: the delivery fee passes through the producer to a courier resident (no money created).
+        const courier = residents.find(n => n.job === COURIER_JOB && n.id !== producer.id), fee = shops.deliveryCost(itemId, quantity);
+        if (courier && fee) tycoonSettle(state.world.ledger, `${id}:fee`, [{ from: 'player', to: producer.id, amount: fee, reason: `Procurement: ${b.id}:delivery:${fee}` },
+          { from: producer.id, to: courier.id, amount: fee, reason: `Delivery: ${id}` }], now);
         b.store.stock.find(s => s.itemId === itemId)!.backroom -= quantity;
         lease.orders.push({ id, itemId, quantity, arrival: minuteOf(now) + 1440, delivered: false }); saveNow();
       }
       return result;
     },
+    deliveryCost: (itemId: string, quantity: number) => haulState()?.fee ? deliveryFee(quantity * unitCost(itemId)) : 0,
     setShopPrice(itemId: string, price: number) { setPrice(playerShop().store, itemId, price); saveNow(); },
     offerJob(npcId: string, hourlyWage: number) {
       const b = playerShop(), now = gameTime(state.world.clock), npc = residents.find(n => n.id === npcId);
@@ -891,5 +901,7 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const result = fn(ctx(), state.tycoon.systems[systemId] as S); saveNow(); return result;
     },
   };
-  return { state, loadResult, tick, saveNow, nextEvent, skipTo, startWork, ...social, ...shops, tycoon };
+  /** C096: player walking-speed multiplier for main's movement (slower while carrying boxes). */
+  const moveSpeed = () => haulState() ? speedFactor(haulState()!) : 1;
+  return { state, loadResult, tick, saveNow, nextEvent, skipTo, startWork, ...social, ...shops, tycoon, moveSpeed };
 }

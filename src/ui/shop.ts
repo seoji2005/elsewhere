@@ -10,6 +10,7 @@ import { weatherFor } from '../sim/weather';
 import type { createSession } from '../game/session';
 import type { PatronState } from '../game/tycoon/patrons';
 import { personas } from '../data/personas';
+import { carried, dropAtShop, pickupOrder, pickupProblem, type HaulState } from '../game/tycoon/haul';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -33,19 +34,20 @@ const playerShop = (state: State) => {
   const lease = activeLease(state);
   return lease && state.book.businesses.find(b => b.id === lease.businessId && b.closedAt === null);
 };
+const haulOf = (state: State) => state.tycoon.systems.haul as HaulState;
 const staff = (state: State, businessId: string) => state.book.employment.filter(e => e.businessId === businessId && e.leftAt === null);
 let wage = 5, reply = '', replyTo = '';
 
 // Status-bar extras: today's weather glyph and the latest lease's arrears warning.
 export function shopStatus(state: State) {
   const lease = state.leases.at(-1), [icon, name] = weathers[weatherFor(state.npcSeed, gameTime(state.world.clock).day)];
-  return { icon, name, warning: lease?.warning === 'shop.unpaid' ? `⚠ 연체 ${lease.arrears}일`
+  return { icon, name, load: carried(haulOf(state)), warning: lease?.warning === 'shop.unpaid' ? `⚠ 연체 ${lease.arrears}일`
     : lease?.warning === 'shop.closed.arrears' ? '⚠ 가게 닫힘' : '' };
 }
 // What decides a rebuild of this tab: lease/shop lifecycle, pending orders, reports and staff.
 export function shopKey(state: State) {
   const b = playerShop(state);
-  return [state.leases.map(l => [l.id, l.ended, l.businessId, l.orders.filter(o => !o.delivered).length, l.reports.length]),
+  return [state.leases.map(l => [l.id, l.ended, l.businessId, l.orders.filter(o => !o.delivered).length, l.reports.length]), haulOf(state).load,
     b ? staff(state, b.id).map(e => e.actorId) : []];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
@@ -97,18 +99,33 @@ export function shopTab(session: Session, ui: ShopUi) {
   live(make('shop-barks', body), () => ((session.tycoon.state().systems.patrons as PatronState | undefined)?.feed ?? [])
     .filter(l => Math.floor(l.minute / 1440) === Math.floor(state.world.clock.totalMinutes / 1440)).slice(-5)
     .map(l => `${hhmm(l.minute % 1440)} ${l.name}(${personas[l.personaId].name}) “${l.text}”`).join('\n') || '아직 손님 말이 없어요.');
-  title('재고 · 판매가 · 주문 (내일 입고)');
+  const load = carried(haulOf(state));
+  if (load) button(row(`들고 있는 상자 📦×${load}`, state.player.placeId === b.placeId ? '가게 안이에요' : `${ui.placeName(b.placeId)} 가게로 가져가세요 · 걸음이 느려요`),
+    '뒷방에 내려놓기', () => `상자 ${session.tycoon.command('haul', (ctx, h: HaulState) => dropAtShop(ctx, h))}개를 뒷방에 넣었어요`,
+    state.player.placeId !== b.placeId);
+  title('재고 · 판매가 · 주문 (배달은 내일, 직접 가면 지금)');
   for (const s of b.store.stock) {
     const supplier = ui.residents.find(n => n.job === producerJobs[s.itemId]);
     const pending = () => lease.orders.filter(o => !o.delivered && o.itemId === s.itemId).reduce((n, o) => n + o.quantity, 0);
+    const where = () => supplier ? session.tycoon.ctx().placeOf(supplier.id) : '';
     const line = row(itemName(s.itemId), () => `${s.backroom + s.displayed}개${pending() ? ` · 입고 예정 ${pending()}` : ''}`
       + `\n원가 ${unitCost(s.itemId)}결 · 판매가 ${s.price}결`);
     button(line, '−', () => session.setShopPrice(s.itemId, s.price - 1), () => s.price <= 1).setAttribute('aria-label', `${itemName(s.itemId)} 값 내리기`);
     button(line, '+', () => session.setShopPrice(s.itemId, s.price + 1)).setAttribute('aria-label', `${itemName(s.itemId)} 값 올리기`);
+    const fee = session.deliveryCost(s.itemId, 5), here = !!supplier && state.player.placeId === where(), order = make('hud-chips', body);
+    if (supplier) live(make('hud-sub', order, 'span'), () => `주문 5 = 배달 (배달비 ${fee}결 · 내일)\n생산자 ${supplier.name} · 지금 ${ui.placeName(where())} (07–19시)`);
     button(line, '주문 5', () => {
       const result = session.orderStock(supplier!.id, s.itemId, 5);
       if (!result.ok) throw Error(result.error);
-      return `${itemName(s.itemId)} 5개 주문 (-${5 * unitCost(s.itemId)}결) · 내일 입고`;
+      return `${itemName(s.itemId)} 5개 배달 주문 (-${5 * unitCost(s.itemId) + fee}결, 배달비 ${fee}결) · 내일 입고`;
+    }, !supplier);
+    button(order, here ? '상자 받기 5 · 지금' : '직접 가지러 가기 · 배달비 0', () => {
+      const problem = pickupProblem(session.tycoon.ctx(), haulOf(state), supplier!.id, s.itemId, 5);
+      if (problem === 'Producer elsewhere') return `${supplier!.name} 님은 지금 ${ui.placeName(where())}에 있어요 · 가서 받으면 배달비 0`;
+      if (problem) return { 'Producer closed': '생산자는 07–19시에만 내줘요', 'Too much to carry': '상자는 12개까지만 들 수 있어요' }[problem] ?? '지금은 받을 수 없어요';
+      const result = session.tycoon.command('haul', (ctx, h: HaulState) => pickupOrder(ctx, h, supplier!.id, s.itemId, 5));
+      if (!result.ok) throw Error(result.error);
+      return `${itemName(s.itemId)} 상자 5개를 받았어요 (-${5 * unitCost(s.itemId)}결) · 가게 뒷방에 내려놓으세요`;
     }, !supplier);
   }
   const employees = staff(state, b.id);
