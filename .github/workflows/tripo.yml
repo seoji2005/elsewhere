@@ -1,0 +1,31 @@
+# Tripo 3D generation (official API) on a GitHub runner, authenticated with the TRIPO_API_KEY
+# repository secret (never on the server). Push a commit to tripo/<name> containing .tripo-jobs.json
+# and .tripo-in/*.png; models and report.json are force-pushed to tripo-result/<name>. Helper: ~/ops/bin/gha-tripo
+name: tripo
+on:
+  push:
+    branches: ['tripo/**']
+permissions:
+  contents: write
+jobs:
+  tripo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q "tripo3d>=1.0.0,<2.0.0"
+      - name: Generate
+        env:
+          TRIPO_API_KEY: ${{ secrets.TRIPO_API_KEY }}
+        run: python tools/gen/tripo.py out 2>&1 | tee tripo.log
+      - name: Push results
+        if: always()
+        run: |
+          name=${GITHUB_REF_NAME#tripo/}
+          mkdir -p out && cp tripo.log out/ || true
+          cd out && git init -q && git checkout -q -b r
+          git config user.name tripo-bot; git config user.email tripo-bot@users.noreply.github.com
+          git add -A && git commit -qm "tripo for $name"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" "r:tripo-result/$name"
