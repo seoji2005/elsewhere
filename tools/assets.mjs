@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { mergeDocuments, prune, dedup, textureCompress, meshopt, unpartition } from '@gltf-transform/functions';
+import { mergeDocuments, prune, dedup, textureCompress, meshopt, unpartition, weld } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
@@ -77,8 +77,28 @@ async function shrinkVrm(file, output, maxSize) {
     }
     console.log(`${basename(file)} hair triangles: ${before} -> ${after} (${(100 * after / before).toFixed(1)}%)`);
   }
+  // Compact shared vertex streams after the existing hair reduction, retaining triangle order and every attribute.
+  for (const mesh of json.meshes) for (const group of Map.groupBy(mesh.primitives, p => JSON.stringify([p.attributes, p.targets])).values()) {
+    const indices = group.map(p => new Uint32Array(array(p.indices)));
+    const joined = new Uint32Array(indices.reduce((n, a) => n + a.length, 0));
+    let offset = 0;
+    for (const a of indices) { joined.set(a, offset); offset += a.length; }
+    const [remap, count] = MeshoptEncoder.reorderMesh(joined, false, true);
+    const attrs = new Set([...Object.values(group[0].attributes), ...(group[0].targets ?? []).flatMap(t => Object.values(t))]);
+    for (const i of attrs) {
+      const a = json.accessors[i], source = data(a.bufferView), stride = source.length / a.count;
+      const bytes = new Uint8Array(count * stride);
+      for (let v = 0; v < a.count; v++) if (remap[v] < count) bytes.set(source.subarray(v * stride, (v + 1) * stride), remap[v] * stride);
+      raw.set(a.bufferView, bytes); a.count = count;
+    }
+    group.forEach((p, n) => {
+      const a = json.accessors[p.indices], values = indices[n].map(v => remap[v]);
+      raw.set(a.bufferView, new Uint8Array(values.buffer));
+      Object.assign(a, { componentType: 5125, count: values.length }); delete a.byteOffset;
+    });
+  }
   // Quantize (KHR_mesh_quantization; model.ts expands them back to floats): positions int16 over +-2 m, normals int8,
-  // UVs and skin weights uint16. Morph deltas use half the scale so +-2 fits. Unreferenced accessors are emptied.
+  // UVs and skin weights uint16. Morph deltas use half the scale so +-2 fits.
   const roles = new Map(json.skins.map(skin => [skin.inverseBindMatrices, 'IBM']));
   for (const { primitives } of json.meshes) for (const p of primitives) {
     roles.set(p.indices, 'INDICES');
@@ -97,7 +117,7 @@ async function shrinkVrm(file, output, maxSize) {
     image.mimeType = 'image/webp';
   }
   for (const [i, accessor] of json.accessors.entries()) {
-    if (!roles.has(i)) { accessor.count = 1; for (const key of ['bufferView', 'byteOffset', 'min', 'max']) delete accessor[key]; continue; }
+    if (!roles.has(i)) continue;
     let bytes = data(accessor.bufferView).subarray(accessor.byteOffset ?? 0);
     const { count } = accessor, n = { VEC2: 2, VEC3: 3, VEC4: 4 }[accessor.type], q = quant[roles.get(i)];
     if (q && accessor.componentType === 5126) {
@@ -118,6 +138,15 @@ async function shrinkVrm(file, output, maxSize) {
         byteStride: stride, count, mode } } }) - 1;
     delete accessor.byteOffset;
   }
+  // VRM extensions refer to nodes, meshes and materials, never accessors.
+  const live = [...roles.keys()].sort((a, b) => a - b), remapAccessor = i => live.indexOf(i);
+  json.accessors = live.map(i => json.accessors[i]);
+  for (const mesh of json.meshes) for (const p of mesh.primitives) {
+    p.indices = remapAccessor(p.indices);
+    for (const attributes of [p.attributes, ...(p.targets ?? [])])
+      for (const key of Object.keys(attributes)) attributes[key] = remapAccessor(attributes[key]);
+  }
+  for (const skin of json.skins) skin.inverseBindMatrices = remapAccessor(skin.inverseBindMatrices);
   json.bufferViews = used;
   json.buffers = [{ byteLength: size(chunks) }, { byteLength: size(fallback), extensions: { EXT_meshopt_compression: { fallback: true } } }];
   for (const key of ['extensionsUsed', 'extensionsRequired']) json[key] = [...(json[key] ?? []), 'EXT_meshopt_compression', 'KHR_mesh_quantization'];
@@ -140,6 +169,9 @@ for (const [bundle, { directory, files, clips, maxTexture }] of Object.entries(m
   document.getRoot().setDefaultScene(scene);
   for (const file of files) {
     const source = await io.read(join(directory, file));
+    // Both character styles use UAL's rig/clips; its preview mannequin is never displayed.
+    if (clips && basename(file) === 'UAL1_Standard.glb')
+      for (const node of source.getRoot().listNodes()) node.setMesh(null).setSkin(null);
     const sourceScene = source.getRoot().getDefaultScene() ?? source.getRoot().listScenes()[0];
     if (!sourceScene) throw Error(`Missing scene: ${file}`);
     const map = mergeDocuments(document, source);
@@ -150,9 +182,9 @@ for (const [bundle, { directory, files, clips, maxTexture }] of Object.entries(m
   }
   if (clips) for (const a of document.getRoot().listAnimations()) if (!clips.includes(a.getName())) { a.listSamplers().forEach(s => s.dispose()); a.dispose(); }
   await document.transform(
-    prune({ keepLeaves: true }), dedup(),
+    prune({ keepLeaves: true }), weld(), dedup(),
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512] }),
-    meshopt({ encoder: MeshoptEncoder, level: 'medium' }), unpartition(),
+    meshopt({ encoder: MeshoptEncoder, level: 'medium' }), weld(), dedup(), unpartition(),
   );
   const output = join(root, `src/assets/${bundle}.glb`);
   await io.write(output, document);
