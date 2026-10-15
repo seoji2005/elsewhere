@@ -49,4 +49,5 @@
 다음 후보(판단 불필요): 캐릭터가 늘어 빌드가 10MB에 닿으면 단일 HTML → 분리 빌드(MASTER_FEEDBACK 7순위; check.sh·play-publish·GHA 스크린샷 함께 수정). C062 텍스처 형식 변환은 절감 2%라 버림.
 사용자 확인 대기:
 - Blender로 처음부터 만든 리세(C061): https://3-34-132-123.sslip.io/lise-b.html?model=lise-b&debug=1 — VRoid판(lise.html)과 비교해 이 방향으로 계속할지
-- R017 Neural4D 결제는 Blender 결과 보고 판단
+- 캐릭터 방향·과금(마스터 추천: 이미지 생성 API로 설정화·텍스처·대화 일러스트 + Blender 계속, REA는 구조 학습만). API 키 제공 여부
+- R017 Neural4D 결제는 보류 추천(후기 없음)
