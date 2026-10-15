@@ -1,0 +1,32 @@
+# Image-to-3D with the public TRELLIS.2 Space (MIT) on a GitHub runner, authenticated with the
+# HF_TOKEN repository secret (never on the server). Push a commit to trellis/<name> containing
+# .trellis-input.png (+ optional .trellis.json {"resolution":"1024","faces":30000,"texture":1024});
+# the GLB is force-pushed to trellis-result/<name>. Helper: ~/ops/bin/gha-trellis
+name: trellis
+on:
+  push:
+    branches: ['trellis/**']
+permissions:
+  contents: write
+jobs:
+  trellis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q gradio_client
+      - name: Generate
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python tools/gen/trellis.py .trellis-input.png out 2>&1 | tee trellis.log
+      - name: Push results
+        if: always()
+        run: |
+          name=${GITHUB_REF_NAME#trellis/}
+          mkdir -p out && cp trellis.log out/ || true
+          cd out && git init -q && git checkout -q -b r
+          git config user.name trellis-bot; git config user.email trellis-bot@users.noreply.github.com
+          git add -A && git commit -qm "trellis for $name"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" "r:trellis-result/$name"
