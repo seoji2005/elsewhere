@@ -16,7 +16,7 @@ try {
   // A new context has no save: day 1, midnight, empty inventory and 100결.
   const page = await browser.newPage({ viewport: { width: 852, height: 393 }, deviceScaleFactor: 1, hasTouch: true });
   page.on('pageerror', error => errors.push(String(error)));
-  page.setDefaultTimeout(10_000);
+  page.setDefaultTimeout(30_000); // UI taps wait for a frame: ~1 fps SwiftShader stalls past 10 s at random steps (C071, 1 in 5 runs)
   const url = pathToFileURL(resolve('dist-single/index.html'));
   url.searchParams.set('phone', 'people,nest'); // Residents are home at midnight.
   await page.goto(url.href);
@@ -115,7 +115,7 @@ try {
   assert.ok(await panel.isVisible(), '바깥 탭으로 종료해도 결폰으로 돌아와야 함');
 
   step = '찻방 이동: 일·소비에 잔향 차 판매 표시';
-  page.setDefaultTimeout(10_000);
+  page.setDefaultTimeout(30_000); // UI taps wait for a frame: ~1 fps SwiftShader stalls past 10 s at random steps (C071, 1 in 5 runs)
   await page.getByRole('button', { name: '결증·장소', exact: true }).tap();
   await panel.getByRole('button', { name: '잔물결 찻방', exact: true }).tap();
   assert.equal(await status.nth(1).innerText(), '잔물결 찻방', '현재 장소가 찻방이어야 함');
