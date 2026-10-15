@@ -130,3 +130,11 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
 .shop-bar i.neg { background: #ff9a8a; }
 .hud-weather { font-size: 18px; line-height: 1; }
 .hud-body.shop .hud-sub { white-space: pre-line; }
+.hud-pause { color: #9fd3ff; }
+.hud-skip { background: rgba(255, 255, 255, 0.86); }
+.hud-ask {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 104px); transform: translateX(-50%); z-index: 2;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 32px); padding: 8px 8px 8px 16px; border-radius: 22px;
+  background: rgba(20, 24, 32, 0.9); color: #fff; font: 600 15px system-ui, sans-serif; white-space: nowrap;
+}
+.hud-ask[hidden] { display: none; }
