@@ -45,8 +45,18 @@ function vacancies(): Record<string, number> {
   return Object.fromEntries(Object.entries(placeCapacities).map(([id, capacity]) => [id, capacity - peaks[id]]));
 }
 
-// Seed is an unsigned 32-bit integer; state belongs to this call only.
+// Pure in (seed, count): sessions regenerate residents on every load, so memoize and hand out copies.
+const built = new Map<string, GeneratedNpc[]>();
 export function generate(seed: number, count: number): GeneratedNpc[] {
+  const key = `${seed}:${count}`;
+  if (!built.has(key)) built.set(key, build(seed, count));
+  return built.get(key)!.map(n => ({ ...n, traits: [...n.traits], likes: [...n.likes], dislikes: [...n.dislikes],
+    speech: { ...n.speech, politeEndings: [...n.speech.politeEndings], informalEndings: [...n.speech.informalEndings] },
+    appearance: { ...n.appearance }, schedule: n.schedule.map(slots => slots.map(slot => ({ ...slot }))) }));
+}
+
+// Seed is an unsigned 32-bit integer; state belongs to this call only.
+function build(seed: number, count: number): GeneratedNpc[] {
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || !Number.isSafeInteger(count) || count < 0) {
     throw Error('Expected uint32 seed and non-negative integer count');
   }

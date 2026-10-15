@@ -9,7 +9,7 @@ import type { Customer } from '../sim/customer';
 import { chooseWeatherNeed, weatherFor, demandWeight } from '../sim/weather';
 import { advanceClock, gameTime } from '../sim/clock';
 import { createWorld } from '../sim/world';
-import { compactLedger } from '../sim/ledger';
+import { compactLedger, isRecorded } from '../sim/ledger';
 import { restoreWorld } from '../sim/save';
 import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
@@ -180,7 +180,8 @@ function checkSocial(state: ReturnType<typeof freshState>): void {
 }
 export function createSession(storage: Storage, npcSeed?: number) {
   let state = freshState(npcSeed), lastSaved = 0, damaged: string | null = null;
-  supplyDay(state, addResidents(state, true, true));
+  // v2+ saves replace the whole state, so only seed the fresh one when it is kept (C092: load cost).
+  const unseeded = state, seed = () => supplyDay(state, addResidents(state, true, true));
   let loadResult: SaveResult = { ok: true };
   const backup = () => {
     if (damaged === null) return;
@@ -190,10 +191,12 @@ export function createSession(storage: Storage, npcSeed?: number) {
   };
   try {
     const raw = storage.getItem(SESSION_KEY);
-    if (raw !== null) {
+    if (raw === null) seed();
+    else {
       try {
         const parsed = JSON.parse(raw);
         if (parsed?.version === 1) {
+          seed();
           state.world = restoreWorld(raw);
           state.player.placeId = state.world.people.player?.placeId ?? state.player.placeId;
           state.market.day = gameTime(state.world.clock).day;
@@ -308,7 +311,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
           state.market.day !== gameTime(state.world.clock).day) throw Error('Invalid clock');
       } catch (error) { state = freshState(npcSeed); supplyDay(state, addResidents(state, true, true)); damaged = raw; loadResult = { ok: false, error }; backup(); }
     }
-  } catch (error) { loadResult = { ok: false, error }; }
+  } catch (error) { if (state === unseeded) seed(); loadResult = { ok: false, error }; }
   const residents = addResidents(state);
   for (const n of residents) state.world.people[n.id] =
     { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
@@ -638,8 +641,11 @@ export function createSession(storage: Storage, npcSeed?: number) {
           }
           const employment = book.employment.find(e => e.actorId === shift.actorId && e.job.id === shift.jobId &&
             e.job.employerId === shift.employerId && e.hiredAt <= shift.startedAt && (e.leftAt === null || shift.startedAt < e.leftAt));
-          if (employment) payCompletedShift(book, world.people, world.ledger, employment.businessId, shift, now);
-          else if (personAccount(world.people, world.ledger, shift.employerId) && personAccount(world.people, world.ledger, shift.actorId))
+          // A broke employer's unrecorded wage can only fail without side effects; skip the per-minute retry (C092).
+          if (employment) {
+            if (!(world.ledger.balances[shift.employerId] < shift.wage) || isRecorded(world.ledger, shift.id))
+              payCompletedShift(book, world.people, world.ledger, employment.businessId, shift, now);
+          } else if (personAccount(world.people, world.ledger, shift.employerId) && personAccount(world.people, world.ledger, shift.actorId))
             finishWork(state.work, world.ledger, shift.id, now);
         }
       };

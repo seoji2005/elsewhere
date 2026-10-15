@@ -2,7 +2,7 @@
 // No upstream code copied. See R015/report.md and research/PROVENANCE.md.
 import type { GameTime } from './clock';
 import type { Person, WorldState } from './world';
-import { transfer, type LedgerState, type Transaction, type TransferResult } from './ledger';
+import { findTransaction, transfer, type LedgerState, type Transaction, type TransferResult } from './ledger';
 import { validateTime } from './npc';
 
 export interface Purse { personId: Person['id']; reserve: number }
@@ -30,7 +30,7 @@ export function payPerson(people: People, ledger: LedgerState, tx: Transaction):
   validateTime(tx.time);
   if (tx.from === tx.to || !personAccount(people, ledger, tx.from) ||
       !personAccount(people, ledger, tx.to)) return { ok: false, error: 'Person accounts required' };
-  const prior = ledger.transactions.find(t => t.id === tx.id);
+  const prior = findTransaction(ledger, tx.id);
   if (prior && (prior.from !== tx.from || prior.to !== tx.to || prior.amount !== tx.amount ||
       prior.reason !== tx.reason)) return { ok: false, error: 'Payment ID conflict' };
   return transfer(ledger, tx);
