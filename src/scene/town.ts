@@ -11,20 +11,25 @@ import { townDoors } from '../data/doors';
 // sidewalks), so player.ts kerbs and bounds hold. Kit numbers per type: ground storey, floor height, width, depth.
 const kit: Record<string, number[]> = { walkup: [4, 3.2, 8, 13], brownstone: [5.5, 3, 6.5, 13], limestone: [4.2, 3.2, 9, 13],
   office: [4.6, 3.6, 14, 15], theater: [5.2, 3.6, 11, 16], laundry: [4.2, 3.1, 7, 12] };
-// Lot: type, mid floors, centre x, façade z, facing (+1 looks at +z, -1 at -z), flip (door side swapped), another
-// kit wall (neighbours of one type apart, STYLE §2). Unflipped, a corner building shows its side façade to the cross
-// street (as block.ts).
-const lots: [string, number, number, number, number, boolean?, string?][] = [
-  // South row: 빛고리 조율실 (office on the corner), 모아결 교환소 (limestone shop), 잔물결 찻방 (walk-up tea room).
-  ['office', 4, -16.5, -9.5, 1], ['limestone', 3, -28, -9.5, 1, true], ['walkup', 3, -36.5, -9.5, 1, true],
-  ['laundry', 3, -44, -9.5, 1], ['brownstone', 2, -50.75, -9.5, 1],
-  // North row: 떠오름 뜰 (pocket square, x -24..-9.5), 겹빛 공동집 (walk-up), 고요결 집 and 높은울 집 (brownstones).
-  ['walkup', 5, -28, 9.5, -1], ['brownstone', 2, -35.25, 9.5, -1], ['brownstone', 4, -41.75, 9.5, -1, false, 'wall_tanbrick'], ['walkup', 3, -49, 9.5, -1],
-  ['brownstone', 3, -12.75, 24.5, -1], ['walkup', 4, -20, 24.5, -1, false, 'wall_brownstone'], // the square's back wall
-  // East of the crossing: the rest of the neighbourhood.
-  ['limestone', 4, 14, -9.5, 1], ['brownstone', 2, 21.75, -9.5, 1], ['walkup', 5, 29, -9.5, 1], ['laundry', 4, 36.5, -9.5, 1],
-  ['walkup', 3, 44, -9.5, 1], ['limestone', 3, 14, 9.5, -1], ['theater', 2, 24, 9.5, -1], ['walkup', 4, 33.5, 9.5, -1],
-  ['brownstone', 3, 40.75, 9.5, -1],
+// Building model: kit type, mid floors, flip (door side swapped), another kit wall (neighbours apart, STYLE §2).
+type Model = [string, number, boolean?, string?];
+// Place -> building model: the one table to swap when real models replace the kit placeholders (data/doors townDoors
+// holds each door, so a new model's door goes there too). 떠오름 뜰 is the open square, not a building.
+export const placeModels: Record<string, Model> = { office: ['office', 4], shop: ['limestone', 3, true],
+  cafe: ['walkup', 3, true], nest: ['walkup', 5], quiet: ['brownstone', 2], high: ['brownstone', 4, false, 'wall_tanbrick'] };
+// Lot: place id or filler model, centre x, façade z, facing (+1 looks at +z, -1 at -z). Unflipped, a corner building
+// shows its side façade to the cross street (as block.ts).
+const lots: [string | Model, number, number, number][] = [
+  // South row: 빛고리 조율실 on the corner, 모아결 교환소, 잔물결 찻방; north row: 떠오름 뜰 (x -24..-9.5), 겹빛 공동집,
+  // 고요결 집, 높은울 집.
+  ['office', -16.5, -9.5, 1], ['shop', -28, -9.5, 1], ['cafe', -36.5, -9.5, 1],
+  ['nest', -28, 9.5, -1], ['quiet', -35.25, 9.5, -1], ['high', -41.75, 9.5, -1],
+  // Fillers: row ends, the square's back wall, east of the crossing.
+  [['laundry', 3], -44, -9.5, 1], [['brownstone', 2], -50.75, -9.5, 1], [['walkup', 3], -49, 9.5, -1],
+  [['brownstone', 3], -12.75, 24.5, -1], [['walkup', 4, false, 'wall_brownstone'], -20, 24.5, -1],
+  [['limestone', 4], 14, -9.5, 1], [['brownstone', 2], 21.75, -9.5, 1], [['walkup', 5], 29, -9.5, 1], [['laundry', 4], 36.5, -9.5, 1],
+  [['walkup', 3], 44, -9.5, 1], [['limestone', 3], 14, 9.5, -1], [['theater', 2], 24, 9.5, -1], [['walkup', 4], 33.5, 9.5, -1],
+  [['brownstone', 3], 40.75, 9.5, -1],
 ];
 const square = { x0: -24, x1: -9.5, z0: 9.5, z1: 24.5 }, sx = (square.x0 + square.x1) / 2, sz = (square.z0 + square.z1) / 2;
 // Curb furniture every 3 m (block.ts rhythm), none in front of a door.
@@ -68,7 +73,8 @@ export async function buildTown(scene: T.Scene) {
   }
   const local = (o: T.Object3D, x0: number, x1: number, z0: number, z1: number, h: number) =>
     new T.Box3().setFromPoints([new T.Vector3(x0, 0, z0), new T.Vector3(x1, h, z1)].map(p => p.applyMatrix4(o.matrixWorld)));
-  for (const [type, mids, x, z, facing, flip, wall] of lots) {
+  for (const [lot, x, z, facing] of lots) {
+    const [type, mids, flip, wall] = typeof lot === 'string' ? placeModels[lot] : lot;
     const [G, FH, W, D] = kit[type], holder = new T.Group();
     holder.position.set(x, 0.11, z - (type === 'brownstone' ? facing * 1.2 : 0)); // brownstones: areaway
     holder.rotation.y = facing > 0 ? 0 : Math.PI;
