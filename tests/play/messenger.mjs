@@ -55,6 +55,12 @@ try {
   step = '약속 잡기: 답장에 시간·장소';
   page.setDefaultTimeout(90_000); // a friend answers 10 game minutes later (1 game minute per second)
   await panel.getByRole('button', { name: '약속 잡기', exact: true }).tap();
+  // C094: the clock stops while the 결폰 is open, so close it until the reply is due, then reopen the chat.
+  const minute = () => { const [, d, h, m] = document.querySelector('.hud-status span').textContent.match(/^(\d+)일째 (\d+):(\d+)/); return (d * 24 + +h) * 60 + +m; };
+  const sent = await page.evaluate(minute);
+  await page.locator('.hud-open:not(.hud-skip)').tap();
+  await page.waitForFunction(`(${minute})() >= ${sent + 11}`);
+  await page.locator('.hud-open:not(.hud-skip)').tap();
   await theirs.nth(1).waitFor();
   assert.match(await theirs.nth(1).innerText(), /^좋아! (오늘|내일) \d+시에 .+에서 봐\.$/);
   await page.screenshot({ path: '.shots/c076-messenger-meet.png' });
