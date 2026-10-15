@@ -40,6 +40,12 @@ export function legs(s: AiState, c: AiContract, phase: 'start' | 'final'): Leg[]
     { from: 'player', to: s.devs[c.dev!], amount: dev, reason: `개발비 ${c.id}:${phase}` }] : [];
 }
 
+/** C111: 고객이 낸 돈은 먼저 묶인 사업 운영 자금(reserve)에서 나간 것으로 본다(일상 소비 여력은 그대로). */
+const spend = (ctx: TycoonCtx, c: AiContract, l: Leg[]) => {
+  const p = ctx.purses[c.clientId], paid = l.filter(x => x.from === c.clientId).reduce((n, x) => n + x.amount, 0);
+  if (p) p.reserve = Math.max(0, p.reserve - paid);
+};
+
 /** 진입점: 수락한 기회 하나에 계약 하나. 잔액은 보지 않는다. */
 export function start(ctx: TycoonCtx, s: AiState, oppId: string) {
   const o = (ctx.systems.opportunity as OpportunityState | undefined)?.opps.find(o => o.id === oppId);
@@ -104,6 +110,7 @@ export function begin(ctx: TycoonCtx, s: AiState, id: string) {
   const c = get(s, id), l = legs(s, c, 'start');
   if (!c.signed || (c.stage !== 'scoping' && c.stage !== 'awaitingFunding')) throw Error('Cannot start');
   if (l.length && !ctx.settle(`${c.id}:start`, l).ok) { c.stage = 'awaitingFunding'; return false; }
+  spend(ctx, c, l);
   const work = developers[c.dev!].work[c.scope!]![0];
   c.defects = ['list', ...scopes[c.scope!].auto].filter(f => ctx.roll('ai:defect', `${c.id}${f}`, 0) < developers[c.dev!].defect);
   Object.assign(c, { stage: 'building', work, left: work }); return true;
@@ -116,7 +123,8 @@ export const results = (c: AiContract) => acceptance(c.scope!, c.defects, c.reus
 export const refund = (s: AiState, c: AiContract) => c.pay === 'advance' ? legs(s, c, 'start')[0].amount - legs(s, c, 'start')[1].amount : 0;
 /** 잔금 묶음(고객→나, 나→개발자). 같은 묶음 ID라 반복·압축 뒤 재호출에도 한 번만 지급된다. 실패는 검수 결과를 바꾸지 않는다. */
 function collect(ctx: TycoonCtx, s: AiState, c: AiContract) {
-  if (ctx.settle(`${c.id}:final`, legs(s, c, 'final')).ok) c.stage = 'delivered';
+  const l = legs(s, c, 'final');
+  if (ctx.settle(`${c.id}:final`, l).ok) { c.stage = 'delivered'; spend(ctx, c, l); }
   return c.stage === 'delivered';
 }
 /** 가진 만큼만 실제로 돌려주고 나머지는 채무로 남긴다(잔액을 음수로 만들지 않는다). */

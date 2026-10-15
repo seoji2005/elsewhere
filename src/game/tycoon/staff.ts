@@ -59,6 +59,7 @@ export function hireTrial(ctx: TycoonCtx, s: StaffState): boolean {
   try { hire(ctx.book, ctx.world.people, ctx.world.ledger, b.id, npc.id, { id: `${b.id}:staff:${ctx.book.employment.length}`, name: npc.job,
     placeId: b.placeId, employerId: 'player', fromMinute: 540, toMinute: 1020, durationMinutes: 480, hourlyWage: t.wage }, ctx.time); } catch { return false; }
   person(s, npc.id).pay ??= { min: 0, paid: 0, owed: 0 }; // C110: paid by the minute through the staff payroll, not the 09:00 shift
+  if (ctx.placeOf(npc.id) === b.placeId) ctx.world.people[npc.id].placeId = b.placeId; // C111: within today's hours, at the counter now
   return !!(t.status = 'hired');
 }
 /** True when the staff payroll pays this resident (the session then starts no 09:00 shift for them). */

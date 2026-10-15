@@ -27,10 +27,10 @@ try {
   const cash = async () => Number((await status()).match(/(\d+)결/)[1]);
   const clock = async () => (await page.locator('.hud-status span').first().innerText());
   const save = () => page.evaluate(() => JSON.parse(localStorage.getItem('trial.vworld.session')).state);
-  const shot = name => page.screenshot({ path: `.shots-c106/${name}.jpg`, quality: 80 });
+  const shot = name => page.screenshot({ path: `.shots-play/${name}.jpg`, quality: 80 });
   const goPlace = async name => { await tab('결증·장소'); await tap(name); await tab('내 가게'); };
   const skip = async () => { await page.locator('.hud-skip').tap(); await page.locator('.hud-ask').getByRole('button', { name: '넘기기' }).tap(); };
-  mkdirSync('.shots-c106', { recursive: true });
+  mkdirSync('.shots-play', { recursive: true });
 
   step = '시작 안내 · 준비된 세계';
   const intro = page.locator('.intro');
