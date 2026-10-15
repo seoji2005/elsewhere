@@ -43,8 +43,11 @@ it('spends the first wage on a gift and changes the existing world relationship 
   const world = createWorld();
   world.ledger = createLedger({ player: 0, cafe: 100, shop: 0 });
   const work = createWorkState();
-  const shift = startWork(work, 'player', 'tea-helper', 'cafe', { ...time, hour: 0 });
-  finishWork(work, world.ledger, shift.id, time);
+  // C114: 찻방 시급 30→2결. 등(30결)을 사려면 첫 근무 하나로는 모자라 15번 근무한다.
+  for (let hour = 0; hour < 15; hour++) {
+    const shift = startWork(work, 'player', 'tea-helper', 'cafe', { ...time, hour });
+    finishWork(work, world.ledger, shift.id, { ...time, hour: hour + 1 });
+  }
   const state = createShopState();
   const relationships = createRelationshipState();
   buyItem(state, world.ledger, 'gift', 'player', 'lamp', time);

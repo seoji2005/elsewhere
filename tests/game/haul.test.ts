@@ -53,7 +53,7 @@ it('C096: refused away from the producer, outside 07–19, above the carry limit
 it('C096: delivery fee goes producer → courier only in a new game; money is conserved', () => {
   for (const fees of [false, true]) {
     const f = setup(123, fees), start = f.total(), cash = f.state.world.ledger.balances.player, sori = f.state.world.ledger.balances.sori;
-    expect(f.session.deliveryCost('tea', 5)).toBe(fees ? 2 : 0); expect(f.session.deliveryCost('tea', 30)).toBe(fees ? 6 : 0);
+    expect(f.session.deliveryCost('tea', 5)).toBe(fees ? 1 : 0); // C114: 최소 배송비 2→1결 expect(f.session.deliveryCost('tea', 30)).toBe(fees ? 6 : 0);
     expect(f.session.orderStock('nuel', 'tea', 30).ok).toBe(true);
     expect(f.state.world.ledger.balances.player).toBe(cash - 60 - (fees ? 6 : 0));
     expect(f.state.world.ledger.balances.sori).toBe(sori + (fees ? 6 : 0));

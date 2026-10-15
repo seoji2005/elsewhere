@@ -50,7 +50,8 @@ try {
   const beforeWork = await cash(), beforeTime = await time();
   const job = panel.locator('.hud-row').filter({ hasText: '잔물결 찻방 돕기' });
   await job.getByRole('button', { name: '일하기', exact: true }).click();
-  assert.equal(await cash(), beforeWork + 30, '1시간 일한 뒤 상단 결이 30 증가해야 함');
+  // C114: 찻방 시급 30→2결(경제 재조정).
+  assert.equal(await cash(), beforeWork + 2, '1시간 일한 뒤 상단 결이 2 증가해야 함');
   assert.ok(await time() >= beforeTime + 60, '근무한 60분이 시각에 반영되어야 함');
 
   step = '결증에서 1주 매수: 결 감소·보유 1주';
@@ -105,7 +106,7 @@ try {
   await page.getByRole('button', { name: '일·소비', exact: true }).click();
   assert.ok(await job.getByRole('button', { name: '일하기', exact: true }).isDisabled(), '찻방을 떠나면 근무 불가');
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');
-  console.log('Play: 결폰 → 일하기(+30결) → 1주 매수 → 저장 → 새로고침 복원 PASS');
+  console.log('Play: 결폰 → 일하기(+2결) → 1주 매수 → 저장 → 새로고침 복원 PASS');
 } catch (error) {
   console.error(`Play loop [${step}] FAIL${expired ? ' (전체 60초 초과)' : ''}: ${error.message}`);
   if (errors.length) console.error(errors.join('\n'));

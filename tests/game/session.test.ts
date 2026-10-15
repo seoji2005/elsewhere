@@ -80,16 +80,19 @@ it('C055: crossing 06:00 rejects all five interactions without mutations; co-loc
 it('C050: completed exchange arrears allow cafe work and remain payable later', () => {
   const session = createSession(memory(), 123), { state } = session;
   session.tick(1440 + 480);
+  // C114: 물건 정리 2시간 80→6결이라 10번 근무로는 사장 돈이 안 떨어진다. 체불 의도를 위해 근무 전 사장 잔액을 줄인다.
+  transfer(state.world.ledger, { id: 'drain-sori', from: 'sori', to: 'nuel', amount: state.world.ledger.balances.sori - 20,
+    time: gameTime(state.world.clock), reason: 'Transfer' });
   for (let day = 2; day <= 3; day++) {
     state.player.placeId = 'shop';
     for (let i = 0; i < 5; i++) { expect(session.startWork('exchange-helper').ok).toBe(true); session.tick(120); }
     if (day === 2) { state.player.placeId = 'nest'; session.tick(840); }
   }
   const arrears = state.work.shifts.find(s => s.actorId === 'player' && !s.paid)!;
-  expect(arrears).toMatchObject({ wage: 80, paid: false }); expect(state.world.ledger.balances.sori).toBe(44);
+  expect(arrears).toMatchObject({ wage: 6, paid: false }); expect(state.world.ledger.balances.sori).toBe(0);
   state.player.placeId = 'cafe'; expect(session.startWork('tea-helper').ok).toBe(true);
   expect(session.startWork('tea-helper').ok).toBe(false); expect(arrears.paid).toBe(false);
-  transfer(state.world.ledger, { id: 'fund-arrears', from: 'player', to: 'sori', amount: 80,
+  transfer(state.world.ledger, { id: 'fund-arrears', from: 'player', to: 'sori', amount: 6,
     time: gameTime(state.world.clock), reason: 'Transfer' });
   session.tick(1); expect(arrears.paid).toBe(true);
 });
@@ -324,7 +327,7 @@ it('balances 30 days of tea demand and pays a care worker without employing tune
   const wages = Object.values(state.world.ledger.history!.days).reduce((sum, day) => sum + (day.iri?.[0] ?? 0), 0) +
     state.world.ledger.transactions.filter(t => t.reason.startsWith('Wage: ')).reduce((sum, t) => sum + t.amount, 0);
   expect({ revenue, wages, owner: state.world.ledger.balances.nuel, employee: state.world.ledger.balances.iri })
-    .toEqual({ revenue: 336, wages: 120, owner: 1216, employee: 1088 });
+    .toEqual({ revenue: 336, wages: 8, owner: 1328, employee: 976 }); // C114: 찻방 시급 30→2결, 임금만 줄고 매출은 같다
   expect(wages).toBeLessThanOrEqual(revenue); expect(state.work.shifts.every(s => s.paid)).toBe(true);
 });
 it('restores two businesses with different contracts and pays their respective owners', () => {
@@ -334,7 +337,8 @@ it('restores two businesses with different contracts and pays their respective o
   session.tick(480); startEmployeeShift(book, session.state.work, 'velo', 'shop', gameTime(world.clock));
   session.saveNow(); const next = createSession(storage);
   expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(session.state);
-  next.tick(60); expect(next.state.world.ledger.balances.sori).toBe(960); expect(next.state.world.ledger.balances.velo).toBe(1040);
+  // C114: 물건 정리 시급 40→3결, 1시간 계약이라 3결이 사장→직원으로 간다.
+  next.tick(60); expect(next.state.world.ledger.balances.sori).toBe(997); expect(next.state.world.ledger.balances.velo).toBe(1003);
   next.tick(3 * 1440); next.saveNow(); expect(createSession(storage).state).toEqual(next.state);
 });
 it('preserves the original v4 two-worker tea contracts and unfinished wages', () => {
@@ -343,7 +347,7 @@ it('preserves the original v4 two-worker tea contracts and unfinished wages', ()
   for (const id of ['velo', 'lise']) hire(book, world.people, world.ledger, 'tea-counter', id, jobs[0], gameTime(world.clock));
   session.tick(900); session.saveNow(); const next = createSession(storage);
   expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(session.state);
-  next.tick(60); expect(next.state.world.ledger.balances.velo).toBe(1022);
+  next.tick(60); expect(next.state.world.ledger.balances.velo).toBe(994); // C114: 찻방 시급 30→2결(1000+2−8)
   expect(next.state.work.shifts.every(s => s.paid)).toBe(true);
 });
 it.each(['future opening', 'unknown business', 'wrong employer', 'capacity', 'duplicate worker'])('rejects invalid generalized contracts: %s', kind => {

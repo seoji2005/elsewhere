@@ -35,12 +35,12 @@ const checksum = (balances: Record<string, number>) => Object.keys(balances).sor
   .reduce((h, k) => [...`${k}=${balances[k]};`].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 2147483647, h), 0);
 // Before C108 the same runs saved 879,807 / 975,519 bytes; balances and revenue are the same runs without C108 compaction
 // (re-pinned at each integration merge that changes game rules — integrate-0300: C107 tax holiday·delivery run, C099 Doren;
-// C109: Doren's fair competition and money circulation).
+// C109: Doren's fair competition and money circulation; C114: 알바 시급 2·3결·최소 배송비 1결).
 // The card's 300KB is out of reach while existing tests pin 14 days of transactions and shop records (~286KB with ads),
 // so this bounds the rest: about half the old size.
 it.each([
-  [false, { player: 4212, revenue: 74555, checksum: 401734276 }],
-  [true, { player: 3964, revenue: 81571, checksum: 446178413 }],
+  [false, { player: 4273, revenue: 74409, checksum: 819345195 }],
+  [true, { player: 4035, revenue: 79422, checksum: 588727505 }],
 ])('C108: 180 days of normal trading (ads %s) save under 500KiB with unchanged results and retired IDs', (ads, expected) => {
   const { session, storage, early, revenue, bytes } = play(180, ads), { state } = session, ledger = state.world.ledger;
   console.log('C108 180-day save bytes', { ads, bytes });

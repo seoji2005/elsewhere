@@ -24,7 +24,8 @@ it('keeps completed wages in arrears, then pays once from customer revenue after
   expect(checkoutBusiness(book, people, ledger, b.id, purses.player, 'customer', end)).toEqual({ ok: true, duplicate: true });
   expect(payCompletedShift(JSON.parse(JSON.stringify(book)), people, ledger, b.id, JSON.parse(JSON.stringify(shift)), end))
     .toEqual({ ok: true, duplicate: true });
-  expect(ledger.balances).toMatchObject({ player: 70, nuel: 0, iri: 1030 });
+  // C114: 찻방 시급 30→2결. 손님 30결 중 임금 2결만 한 번 지급되고 나머지는 사장에게 남는다.
+  expect(ledger.balances).toMatchObject({ player: 70, nuel: 28, iri: 1002 });
   expect(Object.values(ledger.balances).reduce((a, b) => a + b, 0)).toBe(6100);
 });
 

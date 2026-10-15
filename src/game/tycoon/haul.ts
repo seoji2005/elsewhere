@@ -9,8 +9,8 @@ export interface HaulState { load: Record<string, number>; fee: boolean }
 export const CARRY_LIMIT = 12, CARRY_SPEED = 0.8, PICKUP_HOURS = [7, 19] as const, COURIER_JOB = '공유물 순환지기';
 /** Producer's price per unit, as session.orderStock. */
 export const unitCost = (itemId: string) => Math.max(1, Math.floor((items.find(i => i.id === itemId)?.price ?? 4) / 4));
-/** Delivery: 10% of the order, at least 2. */
-export const deliveryFee = (amount: number) => Math.max(2, Math.floor(amount / 10));
+/** Delivery: 10% of the order, at least 1. */
+export const deliveryFee = (amount: number) => Math.max(1, Math.floor(amount / 10));
 export const carried = (s: HaulState) => Object.values(s.load).reduce((n, q) => n + q, 0);
 export const speedFactor = (s: HaulState) => carried(s) ? CARRY_SPEED : 1;
 

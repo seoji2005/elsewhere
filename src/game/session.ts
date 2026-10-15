@@ -45,8 +45,9 @@ import { jobs } from '../data/jobs';
 import { createMessengerState, send, due, meetSlot, replyLine, type MessageKind } from '../sim/messenger';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60, NEW_GAME_SPEED = 2; // game minutes per real second (GDD §2)
-/** C107: the daily report with the day's tax, ad and parking-partner costs (older saves' reports lack them). */
-export type DayReport = ShopReport & { tax: number; ads: number; parking: number };
+/** C107: the daily report with the day's tax, ad and parking-partner costs (older saves' reports lack them).
+ * C114: owed = staff wages still unpaid at the close; the net also subtracts today's change in it. */
+export type DayReport = ShopReport & { tax: number; ads: number; parking: number; owed?: number };
 /** C115: one customer in line at the player's counter; offer is set for a haggler. */
 export interface CounterLine { ref: string; npcId: string; itemId: string; price: number; offer?: number; minute: number }
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
@@ -528,9 +529,11 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
       const cost = sum(t => t.reason.startsWith(`Procurement: ${b?.id}:`)), rent = sum(t => t.reason === `Rent: ${lease.id}`);
       const wages = sum(t => shifts.some(s => s.id === t.id) || t.reason.startsWith('Wage: staff')), tax = sum(t => t.reason === `Tax: ${b?.id}`); // C097: the paid trial day is a wage too
       const ads = sum(t => t.reason.startsWith('Ad: ')), parking = sum(t => t.reason.startsWith('Parking: '));
-      const summary = dailySummary(b?.store ?? createStore('player', []), day);
-      const report: DayReport = { ...summary, cost, rent, wages, tax, ads, parking,
-        net: summary.revenue - cost - rent - wages - tax - ads - parking, reputation: state.reputation.player };
+      const summary = dailySummary(b?.store ?? createStore('player', []), day), staff = state.tycoon.systems.staff as StaffState | undefined;
+      const owed = shifts.filter(s => !s.paid).reduce((n, s) => n + s.wage, 0) +
+        Object.values(staff?.people ?? {}).reduce((n, p) => n + (p.pay?.owed ?? 0), 0), owedBefore = (lease.reports.at(-1) as DayReport | undefined)?.owed ?? 0;
+      const report: DayReport = { ...summary, cost, rent, wages, tax, ads, parking, owed,
+        net: summary.revenue - cost - rent - wages - tax - ads - parking - (owed - owedBefore), reputation: state.reputation.player };
       lease.reports.push(report);
       lease.reports = lease.reports.slice(-7);
     }

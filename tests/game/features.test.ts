@@ -54,7 +54,8 @@ describe('M1-13 10분 안에 첫 수입', () => {
     session.state.player.placeId = 'cafe';
     expect(session.startWork('tea-helper').ok).toBe(true);
     for (let second = 0; second < 60; second++) session.tick(1);
-    expect(balances.player).toBe(before + 30);
+    // C114: 찻방 시급 30→2결. 금액이 아니라 첫 수입이 생겼는지(증가)를 본다.
+    expect(balances.player).toBeGreaterThan(before);
   });
 });
 
