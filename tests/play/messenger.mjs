@@ -3,8 +3,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { distURL } from '../../tools/serve.mjs';
 
 let browser, step = '페이지 열기', expired = false;
 const errors = [];
@@ -14,7 +13,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 852, height: 393 }, deviceScaleFactor: 1, hasTouch: true });
   page.on('pageerror', error => errors.push(String(error)));
   page.setDefaultTimeout(30_000);
-  const url = pathToFileURL(resolve('dist-single/index.html'));
+  const url = new URL(distURL);
   url.searchParams.set('phone', 'chat,nest');
   await page.goto(url.href);
   await page.locator('canvas[data-ready="true"]').waitFor();
