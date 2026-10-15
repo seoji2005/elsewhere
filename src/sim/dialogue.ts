@@ -1,6 +1,7 @@
 import { companies } from '../data/companies';
 import { revealMarketHint, type MarketState } from './market';
 import { dialogueFor, sharedMemoryTemplates, conflictTemplates, marketHintLines } from '../data/dialogue';
+import { companionEvents } from '../data/companions';
 import type { Npc } from '../data/npcs';
 import { archetypes } from '../data/archetypes';
 import type { GeneratedNpc } from './npcgen';
@@ -50,16 +51,27 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   const pending = ctx.scene?.bond?.hurt?.resolved === false;
   const memories = pending ? undefined : state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
-  const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
+  const companionMemories = state.memories[ctx.npc.id];
+  const companion = !pending && companionMemories ? recall({ ...companionMemories,
+    entries: companionMemories.entries.filter(m => m.kind === 'shared-work' && m.mentionedAt === undefined
+      && Math.floor(m.created / 1440) < ctx.time.day - 1 && m.participants?.includes(ctx.actorId)
+      && m.participants.includes(ctx.npc.id) && companionEvents.some(e => e.npcId === ctx.npc.id
+        && m.sourceEventId === `companion:${e.id}:${Math.floor(m.created / 1440) + 1}`))
+  }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+  const shared = companion ?? (memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
     && now - memory.created >= 1440 && memory.participants?.includes(ctx.actorId)
-    && memory.participants.includes(ctx.npc.id)) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+    && memory.participants.includes(ctx.npc.id)) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined);
   const past = !shared && memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'gift' || memory.kind === 'chat') && memory.mentionedAt === undefined
     && now - memory.created >= 1440) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
   const familiar = informalFor(ctx) ?? ctx.value >= 30;
   let sharedLine: string | undefined;
-  if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
+  if (companion && companionMemories) {
+    sharedLine = companionEvents.find(e => e.npcId === ctx.npc.id
+      && companion.sourceEventId === `companion:${e.id}:${Math.floor(companion.created / 1440) + 1}`)!.recallLine;
+    companionMemories.entries.find(m => m.id === companion.id)!.mentionedAt = now;
+  } else if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
     const style = ctx.npc.id === 'lise' && familiar ? 'lise' : ctx.npc.traits.includes('practical')
       ? 'practical' : ctx.npc.traits.includes('social') || ctx.npc.traits.includes('playful') ? 'social' : 'quiet';
     sharedLine = sharedMemoryTemplates[style][shared.kind]
