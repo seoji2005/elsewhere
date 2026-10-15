@@ -67,3 +67,40 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
   .hud-status { gap: 8px; font-size: 12px; }
   .hud-panel { left: 8px; width: auto; top: 104px; bottom: 46vh; }
 }
+/* Dialogue scene (talk.ts): bottom-right box with name tag and typed line, topic choices stacked above it on the
+   right; the resident's close-up fills the left. Tapping the background ends the dialogue. */
+.talking .stick, .talking .hud-top, .talking .enter { visibility: hidden; }
+.talk { position: fixed; inset: 0; z-index: 3; background: linear-gradient(to top, rgba(8, 10, 16, 0.55), transparent 48%); }
+.talk[hidden] { display: none; }
+.talk-column {
+  position: absolute; left: max(290px, calc(env(safe-area-inset-left) + 34%)); right: calc(env(safe-area-inset-right) + 16px);
+  bottom: calc(env(safe-area-inset-bottom) + 16px); display: flex; flex-direction: column; align-items: flex-end; gap: 14px;
+  pointer-events: none;
+}
+.talk-column > * { pointer-events: auto; }
+.talk-box {
+  position: relative; align-self: stretch; min-height: 76px; padding: 22px 20px 16px; border-radius: 16px;
+  background: rgba(16, 20, 30, 0.86); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  color: #fff; font: 500 18px/1.55 system-ui, sans-serif; opacity: 0; transform: translateY(14px); transition: opacity 0.25s, transform 0.25s;
+}
+.talk.show .talk-box { opacity: 1; transform: none; }
+.talk-name {
+  position: absolute; top: -17px; left: 14px; height: 34px; padding: 0 16px; border-radius: 17px; display: flex; align-items: baseline;
+  gap: 2px; background: #ffc178; color: #2b2018; font-size: 16px; line-height: 34px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.talk-name b { font-weight: 800; }
+.talk-sub { font-size: 12px; font-weight: 600; opacity: 0.75; }
+.talk-text { min-height: 56px; white-space: pre-line; word-break: keep-all; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.talk-choices { width: min(320px, 58%); display: flex; flex-direction: column; gap: 8px; }
+.talk-choices[hidden] { display: none; }
+.talk-choice {
+  display: flex; align-items: center; min-height: 46px; padding: 0 16px; border-radius: 12px; text-align: left;
+  background: rgba(16, 20, 30, 0.82); border: 1px solid rgba(255, 255, 255, 0.18); color: #fff; font: 600 16px system-ui, sans-serif;
+  animation: talk-in 0.22s backwards;
+}
+.talk-choice:nth-child(2) { animation-delay: 0.05s; } .talk-choice:nth-child(3) { animation-delay: 0.1s; } .talk-choice:nth-child(4) { animation-delay: 0.15s; }
+.talk-choice::before { content: '◆'; margin-right: 10px; color: #ffc178; font-size: 10px; }
+.talk-choice:active { background: rgba(255, 193, 120, 0.4); }
+.talk-choice.end { color: #c7cdd8; font-weight: 500; } .talk-choice.end::before { content: '✕'; color: #9aa3b5; font-size: 12px; }
+@keyframes talk-in { from { opacity: 0; transform: translateX(16px); } }
+@media (orientation: portrait) { .talk-column { left: 16px; } .talk-choices { width: 100%; } }

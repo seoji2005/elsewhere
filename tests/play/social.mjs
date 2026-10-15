@@ -1,4 +1,4 @@
-// Play scenario: meet a resident, chat, then buy and drink one tea through the HUD.
+// Play scenario: meet a resident, chat face to face in the dialogue scene, then buy and drink one tea through the HUD.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { resolve } from 'node:path';
@@ -66,13 +66,31 @@ try {
   assert.equal(await feelings.getByRole('button', { name: '호감', exact: true }).getAttribute('aria-pressed'), 'true');
   assert.equal(await feelings.getByRole('button', { name: '친구', exact: true }).getAttribute('aria-pressed'), 'false');
 
-  step = '이야기 주제 선택: 대사와 친밀도 표시 변경';
-  const topics = panel.locator('.hud-chips').filter({ hasText: '이야기' }).getByRole('button');
-  assert.ok(await topics.count() > 0, '이야기에 선택할 주제가 하나 이상 있어야 함');
-  await topics.first().tap();
-  const nextLine = (await speech.innerText()).trim();
+  step = '이야기하기: 클로즈업 대사 창, 선택지, 결과 대사, 그만으로 복귀';
+  const who = (await relationship.innerText()).split(' · ')[0];
+  await panel.getByRole('button', { name: '이야기하기', exact: true }).tap();
+  const talk = page.locator('.talk'), line = talk.locator('.talk-text'), choices = talk.locator('.talk-choices button');
+  await talk.waitFor();
+  assert.equal(await panel.isVisible(), false, '대화 중에는 결폰 패널이 숨겨져야 함');
+  assert.ok((await talk.locator('.talk-name').innerText()).startsWith(who), '대사 창 이름표에 주민 이름이 보여야 함');
+  await choices.first().waitFor({ timeout: 30_000 }); // choices appear once the line has finished typing (avatar load first)
+  const opening = (await line.innerText()).trim();
+  assert.ok(opening, '대사 창의 첫 대사가 비어 있지 않아야 함');
+  const count = await choices.count();
+  assert.ok(count >= 3 && count <= 5, `선택지는 주제 2~4개와 그만이어야 함 (${count}개)`);
+  assert.equal(await choices.last().innerText(), '그만', '마지막 선택지는 그만이어야 함');
+  await choices.first().tap();
+  await choices.first().waitFor();
+  const nextLine = (await line.innerText()).trim();
   assert.ok(nextLine, '이야기 뒤에도 대사가 비어 있지 않아야 함');
-  assert.notEqual(nextLine, firstLine, '주제를 탭하면 첫 대사에서 응답 대사로 바뀌어야 함');
+  assert.notEqual(nextLine, opening, '주제를 고르면 첫 대사에서 응답 대사로 바뀌어야 함');
+  await page.waitForFunction(() => { // the camera has eased in next to the resident, not 8 m behind the player
+    const { camera, player } = window.cornerDiagnostics();
+    return Math.hypot(camera[0] - player[0], camera[2] - player[2]) < 3;
+  }, null, { polling: 500 });
+  await choices.last().tap();
+  await talk.waitFor({ state: 'hidden' });
+  assert.ok(await panel.isVisible(), '그만 뒤에는 결폰 패널로 돌아와야 함');
   const afterRelationship = await bondScores.innerText();
   assert.match(afterRelationship, /^호감 -?\d+ · 신뢰 -?\d+$/, '이야기 뒤에도 호감과 신뢰 숫자가 표시되어야 함');
   assert.notEqual(afterRelationship, beforeRelationship, '이야기 뒤 친밀도 표시가 바뀌어야 함');

@@ -26,11 +26,16 @@ function targetSpeed(length: number) {
   return length >= 0.85 ? RUN : WALK * (0.35 + 0.65 * Math.min(1, (length - 0.12) / 0.6));
 }
 
+// Dialogue close-up: where the camera stands (eye) and what it looks at (aim), in world space.
+export interface Closeup { eye: T.Vector3; aim: T.Vector3 }
+
 export function followPlayer(body: T.Object3D, camera: T.PerspectiveCamera, world: World, focusHeight = 1.4) {
   const velocity = new T.Vector3(), focus = new T.Vector3(), ray = new T.Ray(), hit = new T.Vector3();
-  let yaw = 0, pitch = 0, distance = 0, first = true;
+  const eye = new T.Vector3(), aim = new T.Vector3(); // the last close-up pose, kept for the way back
+  let yaw = 0, pitch = 0, distance = 0, first = true, closeness = 0;
   collide(body.position, world.solids);
-  return function update(dt: number, input: { x: number; y: number }, view: { yaw: number; pitch: number; dist: number }) {
+  return function update(dt: number, input: { x: number; y: number }, view: { yaw: number; pitch: number; dist: number },
+    closeup?: Closeup) {
     const length = Math.min(1, Math.hypot(input.x, input.y)), speed = targetSpeed(length);
     const forward = new T.Vector3(-Math.sin(view.yaw), 0, -Math.cos(view.yaw));
     const right = new T.Vector3(-forward.z, 0, forward.x);
@@ -55,7 +60,12 @@ export function followPlayer(body: T.Object3D, camera: T.PerspectiveCamera, worl
       if (ray.intersectBox(wall, hit)) allowed = Math.min(allowed, Math.max(1, hit.distanceTo(focus) - 0.4));
     distance = allowed < distance || first ? allowed : distance + (allowed - distance) * (1 - Math.exp(-dt * 4));
     camera.position.copy(focus).addScaledVector(ray.direction, distance);
-    camera.lookAt(focus);
+    // Close-up: ease from the orbit to the eye/aim on a slight arc (over the player's head), and back when it ends.
+    if (closeup) { eye.copy(closeup.eye); aim.copy(closeup.aim); }
+    closeness += ((closeup ? 1 : 0) - closeness) * (first ? 1 : 1 - Math.exp(-dt * 5));
+    const k = T.MathUtils.smoothstep(closeness, 0, 1);
+    camera.position.lerp(eye, k).y += 1.6 * k * (1 - k);
+    camera.lookAt(hit.copy(focus).lerp(aim, k));
     first = false;
     const near = world.doors.some(door => Math.hypot(door.x - body.position.x, door.z - body.position.z) < 2);
     return { speed: velocity.length(), near };
