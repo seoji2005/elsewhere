@@ -35,15 +35,16 @@ function spot(player: T.Object3D, solids: T.Box3[]) {
   p.setY(Math.abs(p.x) > 5 && Math.abs(p.z) > 5 ? 0.11 : 0);
   return { at: p, facing: centre ? Math.atan2(p.x - centre.x, p.z - centre.z) : Math.atan2(x - p.x, z - p.z) };
 }
-// Half-body framing: hips to above the head fill the height, the face in the upper third, the resident left of centre
-// so the dialogue box has room; the camera stands a little to the side for a three-quarter view.
+// Half-body framing (residents are ~0.8 m chibi figures with big heads): the camera stands at eye level a little to
+// the side for a three-quarter view, far enough that head to waist plus some headroom fill the height, and the aim is
+// shifted so the resident sits in the left third, clear of the dialogue box and choices on the right.
 function frame(at: T.Vector3, facing: number, height: number): Closeup {
-  const dir = new T.Vector3(Math.sin(facing + 0.16), 0, Math.cos(facing + 0.16)), side = new T.Vector3(dir.z, 0, -dir.x);
-  const distance = height * 0.85;
-  // NDC x=-1/3 is the left third. Shift the aim only, keeping the eye in front of the resident.
-  const shift = innerWidth > innerHeight ? distance * Math.tan(T.MathUtils.degToRad(25)) * innerWidth / innerHeight / 3 : 0;
-  const aim = at.clone().addScaledVector(side, shift).setY(at.y + height * 0.74);
-  return { aim, eye: at.clone().addScaledVector(dir, distance).setY(at.y + height * 0.86) };
+  const dir = new T.Vector3(Math.sin(facing + 0.2), 0, Math.cos(facing + 0.2)), side = new T.Vector3(dir.z, 0, -dir.x);
+  const distance = height * 1.15;
+  // NDC x=-0.55 is about the middle of the left third. Shift the aim only, keeping the eye in front of the resident.
+  const shift = innerWidth > innerHeight ? distance * Math.tan(T.MathUtils.degToRad(25)) * innerWidth / innerHeight * 0.55 : 0;
+  const aim = at.clone().addScaledVector(side, shift).setY(at.y + height * 0.66);
+  return { aim, eye: at.clone().addScaledVector(dir, distance).setY(at.y + height * 0.74) };
 }
 
 // Dialogue scene: the chosen resident steps in front of the player (their own avatar), the camera eases into a

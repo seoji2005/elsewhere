@@ -88,7 +88,8 @@ try {
       '가로 폰에서 선택지가 화면 안에 있고 터치 높이 44px 이상이어야 함');
   }
   await choices.first().tap();
-  await talk.locator('.talk-box').tap(); // complete the reply, then tap again to continue
+  // The reply types itself out (30 chars/s); at 1-2 fps it is often complete before a tap lands, and a tap on a
+  // finished reply already moves on to the choices. So wait for the finished reply instead of tapping blind.
   await talk.locator('.talk-box[data-next="탭해서 계속"]').waitFor();
   assert.equal(await talk.locator('.talk-choices').isVisible(), false, '결과 대사를 읽는 동안 선택지는 숨겨져야 함');
   const nextLine = (await line.innerText()).trim();
@@ -157,7 +158,7 @@ try {
   await page.reload({ timeout: 45_000 });
   await page.locator('canvas[data-ready="true"]').waitFor();
   assert.equal(await panel.locator('.hud-note').filter({ hasText: '약속 ·' }).count(), 2);
-  await residents.filter({ hasText: '누엘' }).tap();
+  await residents.filter({ hasText: /^누엘 · / }).tap(); // not a generated name like 아누엘
   assert.match(await relationship.innerText(), /누엘 · 친구/, '친구 조건을 만족해도 기존 약속 때문에 비활성');
   const match = panel.getByRole('button', { name: '소개팅 부탁 (30+)', exact: true });
   assert.ok(await match.isDisabled(), '미완료 약속이 있으면 소개팅 부탁 비활성');
