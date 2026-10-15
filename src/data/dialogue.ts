@@ -90,3 +90,8 @@ export function dialogueFor(npc: Npc, value = 0, actorId = 'player', informal?: 
     gift: informal ? '마음 써 줘서 고마워.' : '마음 써 줘서 고마워요.', dislikedGift: informal ? '마음만 받을게.' : '마음만 받을게요.',
     accept: informal ? '좋아. 함께 시간을 보내자.' : '좋아요. 함께 시간을 보내요.', refuse: informal ? '아직은 준비가 안 됐어.' : '아직은 준비가 안 됐어요.' };
 }
+
+export const marketHintLines = {
+  good: '둘만 있으니 말인데, {company} 쪽 수요가 곧 늘 거래. 며칠 뒤엔 좋은 소식이 들릴 거야.',
+  bad: '둘만 있으니 말인데, {company} 쪽 물량에 차질이 생겼대. 며칠 뒤엔 안 좋은 소식이 들릴 거야.',
+};

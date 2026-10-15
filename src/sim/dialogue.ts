@@ -1,5 +1,10 @@
-import { dialogueFor, sharedMemoryTemplates, conflictTemplates } from '../data/dialogue';
+import { companies } from '../data/companies';
+import { revealMarketHint, type MarketState } from './market';
+import { dialogueFor, sharedMemoryTemplates, conflictTemplates, marketHintLines } from '../data/dialogue';
+import { companionEvents } from '../data/companions';
 import type { Npc } from '../data/npcs';
+import { archetypes } from '../data/archetypes';
+import type { GeneratedNpc } from './npcgen';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
 import { interact, relationshipStage, type DialogueChoice, type RelationshipState,
@@ -13,13 +18,17 @@ export interface DialogueState {
   dating: { actorId: string; npcId: string }[];
 }
 export interface DialogueContext {
+  market?: MarketState;
   actorId: string; npc: Npc; time: GameTime; value: number;
   scene?: { placeId: string; peopleCount: number; atWork: boolean; bond?: Bond };
 }
 function informalFor(ctx: DialogueContext): boolean | undefined {
   const scene = ctx.scene;
+  const npc = ctx.npc as Partial<GeneratedNpc>;
+  const speech = npc.speech ?? (archetypes.find(a => a.id === npc.archetypeId)
+    ?? archetypes.find(a => a.traits.every((trait, i) => trait === ctx.npc.traits[i])) ?? archetypes[0]).speech;
   return scene ? !scene.atWork && scene.peopleCount === 2
-    && (scene.bond ? friendly(scene.bond) : ctx.value >= 30) : undefined;
+    && (scene.bond ? friendly(scene.bond) : ctx.value >= speech.informalAt) : undefined;
 }
 export function conflictLine(ctx: DialogueContext): string | undefined {
   const hurt = ctx.scene?.bond?.hurt;
@@ -40,18 +49,29 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
   const template = dialogueFor(ctx.npc, ctx.scene?.bond?.affection ?? ctx.value, ctx.actorId, informalFor(ctx));
   const pending = ctx.scene?.bond?.hurt?.resolved === false;
-  const memories = pending || informalFor(ctx) === false ? undefined : state.memories[ctx.npc.id];
+  const memories = pending ? undefined : state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
-  const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
+  const companionMemories = state.memories[ctx.npc.id];
+  const companion = !pending && companionMemories ? recall({ ...companionMemories,
+    entries: companionMemories.entries.filter(m => m.kind === 'shared-work' && m.mentionedAt === undefined
+      && Math.floor(m.created / 1440) < ctx.time.day - 1 && m.participants?.includes(ctx.actorId)
+      && m.participants.includes(ctx.npc.id) && companionEvents.some(e => e.npcId === ctx.npc.id
+        && m.sourceEventId === `companion:${e.id}:${Math.floor(m.created / 1440) + 1}`))
+  }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+  const shared = companion ?? (memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
     && now - memory.created >= 1440 && memory.participants?.includes(ctx.actorId)
-    && memory.participants.includes(ctx.npc.id)) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
+    && memory.participants.includes(ctx.npc.id)) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined);
   const past = !shared && memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'gift' || memory.kind === 'chat') && memory.mentionedAt === undefined
     && now - memory.created >= 1440) }, ctx.time, { subjectId: ctx.actorId }, 1)[0] : undefined;
   const familiar = informalFor(ctx) ?? ctx.value >= 30;
   let sharedLine: string | undefined;
-  if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
+  if (companion && companionMemories) {
+    sharedLine = companionEvents.find(e => e.npcId === ctx.npc.id
+      && companion.sourceEventId === `companion:${e.id}:${Math.floor(companion.created / 1440) + 1}`)!.recallLine;
+    companionMemories.entries.find(m => m.id === companion.id)!.mentionedAt = now;
+  } else if (shared && memories && (shared.kind === 'meal' || shared.kind === 'shared-work')) {
     const style = ctx.npc.id === 'lise' && familiar ? 'lise' : ctx.npc.traits.includes('practical')
       ? 'practical' : ctx.npc.traits.includes('social') || ctx.npc.traits.includes('playful') ? 'social' : 'quiet';
     sharedLine = sharedMemoryTemplates[style][shared.kind]
@@ -65,8 +85,13 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   const choices: DialogueChoice[] = ctx.npc.likes.map((topic, index) => ({
     id: `chat:${index}`, topic, tone: ctx.npc.traits[0] ?? 'quiet',
   }));
-  return { line: (pending ? conflictLine(ctx) : undefined) ?? sharedLine ?? (familiar && past && past.created < now
-    ? memoryLine(past) : familiar ? template.familiar : template.greeting),
+  // No tips while a conflict is unresolved (C074): the line is the awkward one.
+  const hint = !pending && ctx.market && ctx.scene?.bond && friendly(ctx.scene.bond) && informalFor(ctx)
+    ? revealMarketHint(ctx.market, ctx.npc.job) : undefined;
+  const hintLine = hint ? marketHintLines[hint.size > 0 ? 'good' : 'bad']
+    .replace('{company}', companies.find(c => c.id === hint.companyId)!.name) : '';
+  return { line: ((pending ? conflictLine(ctx) : undefined) ?? sharedLine ?? (familiar && past && past.created < now
+    ? memoryLine(past) : familiar ? template.familiar : template.greeting)) + (hintLine ? ` ${hintLine}` : ''),
     // The legacy 90-point label is numeric; dating is only established by mutual consent.
     stage: ctx.value >= 90 && !isDating(state, ctx.actorId, ctx.npc.id)
       ? '호감' : relationshipStage(ctx.value), choices };

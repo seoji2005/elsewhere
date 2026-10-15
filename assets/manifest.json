@@ -48,9 +48,7 @@
       "Sitting_Enter",
       "Sitting_Idle_Loop",
       "Sitting_Exit",
-      "Sitting_Talking_Loop",
       "Interact",
-      "PickUp_Table",
       "Idle_Talking_Loop"
     ]
   },

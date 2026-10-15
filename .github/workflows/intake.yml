@@ -1,0 +1,92 @@
+# Push intake/<name> with .intake.json and incoming/*.glb, or dispatch with a
+# tripo-result/<name> source branch (file paths are relative to that branch).
+# Spec: {"assets":[{"id":"bench","kind":"prop","file":"incoming/bench.glb",
+# "height":1.2,"front":"+z","interactions":[{"name":"seat","position":[0,0.5,0]}]}]}
+# Points use normalized metres before front rotation, Y up; canonical front is +Z.
+name: intake
+on:
+  push:
+    branches: ['intake/**']
+  workflow_dispatch:
+    inputs:
+      name:
+        description: Result name (letters, numbers, underscore, hyphen)
+        required: true
+      source_branch:
+        description: Optional tripo-result/<name> branch containing GLBs
+        required: false
+permissions:
+  contents: write
+concurrency:
+  group: intake-${{ inputs.name || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  intake:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      BLENDER: ${{ github.workspace }}/.blender/blender-4.2.3-linux-x64/blender
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: Check request
+        env:
+          REQUEST_NAME: ${{ inputs.name }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          name=${REQUEST_NAME:-${GITHUB_REF_NAME#intake/}}
+          [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$ ]]
+          [[ -z "$SOURCE_BRANCH" || "$SOURCE_BRANCH" == tripo-result/* ]]
+          echo "RESULT_NAME=$name" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        if: inputs.source_branch != ''
+        with:
+          ref: ${{ inputs.source_branch }}
+          path: tripo-input
+          persist-credentials: false
+      - uses: actions/cache@v4
+        id: blender
+        with:
+          path: .blender
+          key: blender-4.2.3-linux-x64
+      - name: Install Blender 4.2 LTS
+        if: steps.blender.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .blender
+          cd .blender
+          base=https://download.blender.org/release/Blender4.2
+          curl --fail --silent --show-error --location "$base/blender-4.2.3-linux-x64.tar.xz" -o blender.tar.xz
+          curl --fail --silent --show-error --location "$base/blender-4.2.3.sha256" -o checksums
+          grep 'blender-4.2.3-linux-x64.tar.xz$' checksums | sed 's/blender-4.2.3-linux-x64.tar.xz/blender.tar.xz/' | sha256sum --check --strict
+          tar -xf blender.tar.xz
+          rm blender.tar.xz checksums
+      - name: Normalize and preview
+        env:
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          input_root=.
+          if [[ -n "$SOURCE_BRANCH" ]]; then input_root=tripo-input; fi
+          node tools/intake.mjs --input-root "$input_root" --out intake-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: intake-${{ env.RESULT_NAME }}
+          path: intake-out/
+          if-no-files-found: ignore
+      - name: Publish result branch
+        if: always() && env.RESULT_NAME != ''
+        run: |
+          test -f intake-out/report.json || exit 0
+          # Stage only output, with checkout credentials kept in the existing config.
+          cd intake-out
+          export GIT_DIR="$GITHUB_WORKSPACE/.git" GIT_WORK_TREE="$PWD"
+          export GIT_INDEX_FILE="$RUNNER_TEMP/intake-index-$GITHUB_RUN_ID"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+          git add -A
+          tree=$(git write-tree)
+          commit=$(git -c user.name=intake-bot -c user.email=intake-bot@users.noreply.github.com commit-tree "$tree" -m "Asset intake results")
+          git push --force origin "$commit:refs/heads/intake-result/$RESULT_NAME"
+          rm -f "$GIT_INDEX_FILE"

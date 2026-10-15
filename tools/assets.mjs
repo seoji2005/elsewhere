@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { mergeDocuments, prune, dedup, textureCompress, meshopt, unpartition, weld } from '@gltf-transform/functions';
+import { mergeDocuments, prune, dedup, textureCompress, meshopt, unpartition, resample, weld } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder, MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
@@ -182,7 +182,7 @@ for (const [bundle, { directory, files, clips, maxTexture }] of Object.entries(m
   }
   if (clips) for (const a of document.getRoot().listAnimations()) if (!clips.includes(a.getName())) { a.listSamplers().forEach(s => s.dispose()); a.dispose(); }
   await document.transform(
-    prune({ keepLeaves: true }), weld(), dedup(),
+    prune({ keepLeaves: true }), weld(), dedup(), resample({ tolerance: 1e-3 }),
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512] }),
     meshopt({ encoder: MeshoptEncoder, level: 'medium' }), weld(), dedup(), unpartition(),
   );

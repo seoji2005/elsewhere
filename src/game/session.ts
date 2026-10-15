@@ -1,4 +1,5 @@
 import { npcs } from '../data/npcs';
+import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
 import { companies } from '../data/companies';
 import { items } from '../data/items';
@@ -24,6 +25,7 @@ import { createRippleState, deliverRipple, noticeLine, type SocialEvent } from '
 import { createPurse, funds, personAccount, payPerson, dayCashflow } from '../sim/purse';
 import { openBusiness, hire, startEmployeeShift, payCompletedShift, checkoutBusiness, revenueChange, procure, producerJobs, type BusinessBook } from '../sim/business';
 import { jobs } from '../data/jobs';
+import { createMessengerState, send, due, meetSlot, replyLine, type MessageKind } from '../sim/messenger';
 import type { Storage } from './storage';
 export const SESSION_KEY = 'vworld.session', AUTOSAVE_MINUTES = 60;
 export type SaveResult = { ok: true } | { ok: false; error: unknown };
@@ -111,7 +113,7 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
     shop: createShopState(), relationships: createRelationshipState(),
     encounters: createEncounterState(), matchmaking: createMatchmakingState(),
-    dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds' };
+    dialogue: createDialogueState(), bonds: createBonds(), ripple: createRippleState(), relationMode: 'bonds' as 'legacy' | 'bonds', messenger: createMessengerState() };
 }
 // Check required structures before exposing a restored state to simulation ticks.
 function checkShape(value: unknown, template: unknown): void {
@@ -202,10 +204,12 @@ export function createSession(storage: Storage, npcSeed?: number) {
         if (parsed.version < 5) state.populationEconomy = false;
         state.revenueHistory ??= {};
         state.reputation ??= { player: 0 };
+        state.messenger ??= createMessengerState(); // saves before the messenger (C076)
         // Generated identities are omitted from saves; wallets and contracts are retained.
         if (parsed.version >= 5 && generate(state.npcSeed, 50).some(n =>
           !state.purses[n.id] || !Object.hasOwn(state.world.ledger.balances, n.id))) throw Error('Missing resident wallet');
         addResidents(state);
+        state.market.hints ??= [];
         checkShape(state, { ...freshState(), world: createWorld() });
         if (Object.values(state.reputation).some(n => !Number.isFinite(n) || n < -100 || n > 100))
           throw Error('Invalid reputation');
@@ -318,7 +322,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
     const atWork = Object.entries({ office: ['빛씨 조율사', '빛고리 조율실 수석 조율사', '밤결 기록사'],
       cafe: ['잔향 차 배합사'], shop: ['공유물 순환지기'], park: ['떠오름 뜰 돌봄사'] })
       .some(([place, jobs]) => place === placeId && jobs.includes(npc.job));
-    return { actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
+    return { market: state.player.placeId === placeId ? state.market : undefined, actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
       scene: { placeId, atWork, peopleCount: residents.filter(n => whereIs(n, time) === placeId).length
         + Number(state.player.placeId === placeId),
       bond: state.relationMode === 'bonds' ? readBond(state.bonds, npcId, 'player') : undefined } };
@@ -344,6 +348,23 @@ export function createSession(storage: Storage, npcSeed?: number) {
     if (whereIs(npc, time) !== state.player.placeId) throw Error('지금 여기 없어요');
   };
   const social = {
+    availableCompanions() {
+      const time = gameTime(state.world.clock), minute = time.hour * 60 + time.minute;
+      return companionEvents.filter(event => state.relationMode === 'bonds'
+        && minute >= event.fromMinute && minute < event.untilMinute && state.player.placeId === event.placeId
+        && whereIs(residents.find(n => n.id === event.npcId)!, time) === event.placeId
+        && !state.dialogue.memories[event.npcId]?.entries.some(m =>
+          m.sourceEventId === `companion:${event.id}:${time.day}`));
+    },
+    joinCompanion(eventId: string) {
+      const event = social.availableCompanions().find(event => event.id === eventId);
+      if (!event) return false;
+      const time = gameTime(state.world.clock);
+      return completeShared({ id: `companion:${event.id}:${time.day}`, actorId: 'player',
+        participants: ['player', event.npcId], kind: 'shared-work', time, status: 'completed',
+        placeId: event.placeId, placeName: state.world.places[event.placeId].name,
+        activityName: event.activityName }, { trust: 3, respect: 2, comfort: 3 });
+    },
     stageFor(npcId: string) {
       const ctx = context(npcId);
       if (state.relationMode === 'bonds') return stageOf(state.bonds, npcId, 'player', state.dialogue);
@@ -433,6 +454,10 @@ export function createSession(storage: Storage, npcSeed?: number) {
           readBond(state.bonds, request.introducerId, n.id).met ? 10 : 0])) };
       return requestMatch(state.matchmaking, state.encounters, { relationships }, request);
     },
+    sendMessage(id: string, npcId: string, kind: MessageKind) {
+      const { npc, time } = context(npcId);
+      return send(state.messenger, npc, kind, social.stageFor(npcId), time, id);
+    },
   };
   const playerLife = () => state.shop.residents.player ??= { inventory: {}, energy: 50,
     appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
@@ -456,6 +481,22 @@ export function createSession(storage: Storage, npcSeed?: number) {
       }
       if (appointment.status === 'no-show' && appointment.noShowBy.includes(appointment.actorId))
         applyBondEvent(state.bonds, `match-no-show:${appointment.id}`, now, noShowEffects(appointment));
+    }
+  };
+  // Replies land when their minute arrives: chat warms the bond, a friend's yes becomes a real appointment.
+  const deliverMessages = (now: ReturnType<typeof gameTime>) => {
+    for (const reply of due(state.messenger, minuteOf(now))) {
+      const npc = residents.find(n => n.id === reply.npcId)!;
+      const close = state.relationMode === 'bonds' ? friendly(readBond(state.bonds, npc.id, 'player'))
+        : (state.world.relationships.player?.[npc.id] ?? 0) >= 30;
+      const slot = reply.kind === 'meet' && close && !state.matchmaking.appointments.some(a =>
+        ['scheduled', 'offered'].includes(a.status)) ? meetSlot(npc, minuteOf(now)) : undefined;
+      if (slot) state.matchmaking.appointments.push({ id: `meet:${reply.id}`, actorId: 'player', introducerId: npc.id,
+        npcId: npc.id, ...slot, impression: { name: npc.name, appearance: {}, keywords: [...npc.traits], note: '' },
+        playerInterest: 2, npcInterest: 2, status: 'scheduled', noShowBy: [] });
+      if (reply.kind !== 'meet') applyBondEvent(state.bonds, reply.id, now, [{ fromId: npc.id, toId: 'player',
+        delta: reply.kind === 'hello' ? { comfort: 2 } : { affection: 2, comfort: 1 } }]);
+      reply.text = replyLine(npc, reply, slot); reply.delivered = true;
     }
   };
   const tick = (realSeconds: number): SaveResult | undefined => {
@@ -584,6 +625,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
     state.world.clock.totalMinutes = target;
     const now = gameTime(state.world.clock);
     resolveMatches(now);
+    deliverMessages(now);
     for (const npc of residents) if (state.world.people[npc.id]) state.world.people[npc.id].placeId = whereIs(npc, now);
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
