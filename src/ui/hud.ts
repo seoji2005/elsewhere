@@ -277,7 +277,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
     cashText.textContent = `${cash}결`;
-    energyText.textContent = `활력 ${energy}`;
+    energyText.textContent = `활력 ${Math.round(energy)}`;
     pending ||= force;
     if (panel.hidden) return;
     const membership = tab === 'people'
