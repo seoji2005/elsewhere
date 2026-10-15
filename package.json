@@ -8,6 +8,7 @@
     "assets": "node tools/assets.mjs",
     "build": "tsc --noEmit && vite build --configLoader runner",
     "check": "bash tools/check.sh",
+    "build:trial": "VITE_COMMIT=$(git rev-parse --short HEAD) npm run build",
     "build:single": "tsc --noEmit && vite build --mode single --configLoader runner",
     "test": "vitest run --configLoader runner"
   },

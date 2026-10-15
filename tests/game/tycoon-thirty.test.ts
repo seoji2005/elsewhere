@@ -12,6 +12,7 @@ import { respond, currentEvent } from '../../src/game/tycoon/cityEvents';
 import { askQuestion, inquire, answer, defOf, type OpportunityState } from '../../src/game/tycoon/opportunity';
 import { askReuse, begin, legs, renegotiate, inspect, pickDev, pickScope, rework, results, sign, start, type AiState } from '../../src/game/tycoon/aiContracts';
 import { leisure } from '../../src/game/tycoon/leisure';
+import { scopes } from '../../src/data/aiContracts';
 import { shows } from '../../src/data/shows';
 import { partnerLot, roadworks } from '../../src/data/cityEvents';
 import type { CityState } from '../../src/sim/cityEvents';
@@ -50,7 +51,7 @@ test('C106 30분 경로: 준비 세계에서 단계별 도달·보존·방치 �
   const { store, s } = open();
   expect(prepareTrial(s)).toBe(true);
   expect(prepareTrial(s)).toBe(false); // 이미 준비된 세계는 다시 손대지 않는다
-  expect([minute(s), shop(s).placeId, s.state.world.ledger.balances.player]).toEqual([420, 'shop', 40]);
+  expect([minute(s), shop(s).placeId, s.state.world.ledger.balances.player]).toEqual([420, 'shop', 60]); // C111 초기 배분: 보증금 뒤 60결
   expect(shop(s).store.stock.every(x => x.backroom + x.displayed === 0)).toBe(true); // 재고·판매를 미리 넣지 않는다
   const startTotal = total(s), rows: [string, string][] = [], step = (name: string, f: () => string) => {
     let r: string; try { r = f(); } catch (e) { r = `막힘: ${(e as Error).message}`; } rows.push([name, r]); return r;
@@ -74,7 +75,7 @@ test('C106 30분 경로: 준비 세계에서 단계별 도달·보존·방치 �
   });
   step('3~8분 손님 한마디·흥정', () => {
     const p = sys<PatronState>(s, 'patrons');
-    play(s, () => p.haggles.length > 0, 240);
+    play(s, () => p.haggles.length > 0, 120); // C111: 흥정을 2분까지 기다린다(3~8분 구간, 시험 근무가 근무 시간 안에 끝나게)
     const h = p.haggles[0];
     if (h) s.tycoon.command('patrons', (c, st: PatronState) => answerHaggle(c, st, h.visitId, true));
     const guest = res.find(n => s.state.world.people[n.id]?.placeId === 'shop' && n.id !== shows[0].hostId); // 가게 손님과 첫 대화 → 아는 사이
@@ -94,7 +95,14 @@ test('C106 30분 경로: 준비 세계에서 단계별 도달·보존·방치 �
     go(s, 'shop');
     if (!s.tycoon.command('staff', (c, x: StaffState) => hireTrial(c, x))) throw Error(`채용 안 됨(${st.trial?.status})`);
     s.tycoon.command('staff', (_c, x: StaffState) => setPolicy(x, { taskPriority: 'checkout' }));
-    return `도달 · 시험 계산 ${st.trial!.checkouts}·진열 ${st.trial!.stocked} · 정책 v${st.policy.version}`;
+    // C111 채용 당일: 근무 시간 안이면 바로 계산대에 서고, 그 분부터 분 단위 급여가 쌓인다.
+    const hiredAt = minute(s), sameDay = () => Math.floor(minute(s) / 1440) === Math.floor(hiredAt / 1440);
+    expect(hiredAt % 1440 >= 540 && hiredAt % 1440 < 1020, `근무 시간 안에 채용 ${hiredAt}`).toBe(true);
+    expect(onDuty(s.tycoon.ctx(), st)).toContain(who);
+    expect(s.state.world.people[who].placeId).toBe('shop');
+    play(s, () => (st.people[who].pay?.min ?? 0) >= 30, 60);
+    expect(sameDay() && st.people[who].pay!.min >= 30, '채용 당일 근무 분').toBe(true);
+    return `도달 · 시험 계산 ${st.trial!.checkouts}·진열 ${st.trial!.stocked} · 정책 v${st.policy.version} · 당일 근무 ${st.people[who].pay!.min}분`;
   });
   step('8~14분 광고 하나', () => {
     const c = s.tycoon.command('ads', (ctx, a: AdState) => buyCampaign(ctx, a, { channelId: 'flyer', messageId: 'price', modelId: 'none', targets: ['workers'], weeks: 1 }));
@@ -156,7 +164,10 @@ test('C106 30분 경로: 준비 세계에서 단계별 도달·보존·방치 �
       play(s, () => c.stage === 'testing', 1440);
       fails = s.tycoon.command('aiContract', (ctx, x: AiState) => inspect(ctx, x, c.id));
     }
-    return `${c.stage === 'delivered' ? '도달' : `막힘(잔금 ${legs(sys<AiState>(s, 'aiContract'), c, 'final')[0].amount}결 > 고객 지갑 ${s.state.world.ledger.balances[c.clientId]})`} · ${c.stage} · 재작업 ${c.reworked} · 사례 ${results(c).length}`;
+    const share = legs(sys<AiState>(s, 'aiContract'), c, 'start').concat(legs(sys<AiState>(s, 'aiContract'), c, 'final'))
+      .reduce((n, l) => n + (l.to === 'player' ? l.amount : -l.amount), 0), nets = s.state.leases[0].reports.map(r => r.net);
+    expect(s.state.purses[c.clientId].reserve, '고객 운영 자금에서 지급').toBe(trial.operating - scopes[c.scope!].price);
+    return `${c.stage === 'delivered' ? `도달 · 내 몫 ${share}결(가게 하루 순이익 ${nets.join('·')})` : `막힘(잔금 ${legs(sys<AiState>(s, 'aiContract'), c, 'final')[0].amount}결 > 고객 지갑 ${s.state.world.ledger.balances[c.clientId]})`} · ${c.stage} · 재작업 ${c.reworked} · 사례 ${results(c).length}`;
   });
   step('25~30분 공연·취향·공동 기억', () => {
     const show = shows[0], l = leisure(s), mate = res.find(n => n.id !== show.hostId && s.stageFor(n.id) !== '낯섦');
@@ -185,7 +196,6 @@ test('C106 30분 경로: 준비 세계에서 단계별 도달·보존·방치 �
   expect(table.delegated.contracts + table.delegated.relations).toBe(0); // 맡긴 뒤 입력 없이 계약·공동 경험이 생기지 않는다
   expect(sys<StaffState>(delegated, 'staff').outcomes.length).toBeGreaterThan(0);
   expect([total(idle), total(delegated)]).toEqual([startTotal, startTotal]);
-  // 2026-10-16 main 기준 막힘: AI 잔금(고객 지갑이 잔금보다 적어 awaitingPayment). 막힌 단계는 표로만 보고하고 통과시키지 않는다.
-  const reached = rows.filter(([, r]) => r.startsWith('도달')).map(([n]) => n);
-  expect(reached).toEqual(rows.map(([n]) => n).filter(n => n !== '25~30분 AI 검수·잔금'));
+  // C111: AI 잔금 막힘 해소(고객 사업 운영 자금) → 모든 단계 도달.
+  expect(rows.filter(([, r]) => !r.startsWith('도달'))).toEqual([]);
 });

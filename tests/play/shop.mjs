@@ -36,14 +36,14 @@ try {
       .map(b => b.getBoundingClientRect()).filter(r => r.width < 44 || r.height < 44).length);
     assert.equal(small, 0, '내 가게 버튼은 44px 이상이어야 함');
   };
-  mkdirSync('.shots-c086', { recursive: true });
+  mkdirSync('.shots-play', { recursive: true });
 
   step = '빈 점포 목록';
   assert.match(await page.locator('.hud-tabs .on').innerText(), /내 가게/);
   assert.equal(await panel.locator('.hud-row').filter({ hasText: /보증금 \d+결 · 하루 임대료 \d+결/ }).count(), 2, '빈 점포 2곳');
   assert.match(await page.locator('.hud-status').innerText(), /[☀☁☂]/, '상단 바 날씨 한 글자');
   await fingers();
-  await page.screenshot({ path: '.shots-c086/1-empty.jpg', quality: 85 });
+  await page.screenshot({ path: '.shots-play/1-empty.jpg', quality: 85 });
 
   step = '계약 → 찻집 개업';
   const cash = (await save()).world.ledger.balances.player;
@@ -75,9 +75,9 @@ try {
   assert.match(await tea.innerText(), /^잔향 차\s*5개/, '주문한 차가 입고되어야 함');
   assert.match(await panel.locator('.shop-stats').innerText(), /어제 순이익\s*[+-]?\d+결/);
   await fingers();
-  await page.screenshot({ path: '.shots-c086/2-summary.jpg', quality: 85 });
+  await page.screenshot({ path: '.shots-play/2-summary.jpg', quality: 85 });
   await panel.locator('.shop-chart').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: '.shots-c086/2b-staff-chart.jpg', quality: 85 });
+  await page.screenshot({ path: '.shots-play/2b-staff-chart.jpg', quality: 85 });
 
   step = '직원 구하기: 아는 사이가 아니면 거절';
   await tap('직원 구하기');
@@ -93,7 +93,7 @@ try {
   await velo.getByRole('button', { name: '제안' }).tap();
   assert.match(await panel.locator('.hud-say').innerText(), /^벨로: “좋아/);
   await fingers();
-  await page.screenshot({ path: '.shots-c086/3-hire.jpg', quality: 85 });
+  await page.screenshot({ path: '.shots-play/3-hire.jpg', quality: 85 });
   await tap('‹ 가게');
   assert.match(await panel.locator('.hud-row').filter({ hasText: /^벨로/ }).innerText(), /시급 \d+결 · 09:00–17:00 근무/);
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');
