@@ -13,6 +13,7 @@ import { compactLedger, isRecorded } from '../sim/ledger';
 import { restoreWorld } from '../sim/save';
 import { roll as tycoonRoll, settle as tycoonSettle, nextId as tycoonNextId } from '../sim/tycoonCore';
 import { tycoonSystems } from './tycoon/registry';
+import { sign, type CounselState } from './tycoon/counsel';
 import type { TycoonCtx, TycoonSystem } from './tycoon/system';
 import { emptyTycoon, createTycoon, restoreTycoon, runMinute, runDay, type TycoonState } from './tycoon/state';
 import { whereIs, validateTime } from '../sim/npc';
@@ -356,8 +357,10 @@ export function createSession(storage: Storage, npcSeed?: number, systems: reado
     return b;
   };
   const shops = {
-    rentStore(storefrontId: string) {
-      const lease = rentStorefront(state.leases, state.world.ledger, storefrontId, gameTime(state.world.clock));
+    /** With a counsel contract id the lease is signed through it (C101); without one it stays a plain lease. */
+    rentStore(storefrontId: string, contractId?: string) {
+      const lease = contractId ? tycoon.command('counsel', (c, s: CounselState) => sign(c, s, contractId, storefrontId))
+        : rentStorefront(state.leases, state.world.ledger, storefrontId, gameTime(state.world.clock));
       saveNow(); return lease;
     },
     terminateStore() { endLease(activeLease(), state.book, state.world.ledger, gameTime(state.world.clock)); saveNow(); },

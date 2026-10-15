@@ -28,6 +28,7 @@ const problems: Record<string, string> = {
   'Outside work hours': '지금은 근무 시간이 아니에요', 'Unfinished shift': '끝나지 않은 근무가 있어요',
   'Insufficient funds': '결이 모자라요', unaffordable: '결이 모자라요', 'Savings reserved': '결이 모자라요',
   missing: '물건이 다 떨어졌어요', expensive: '값이 너무 올랐어요', 'Not queue head': '앞 손님이 계산 중이에요',
+  'Not negotiable': '이 조항은 빼기 어렵대요', 'Contract unavailable': '이미 서명한 계약서예요',
 };
 
 // Thumb UI over the canvas: joystick ring, door button, toast, status bar and the 결폰 panel driving the session.

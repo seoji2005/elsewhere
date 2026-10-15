@@ -8,6 +8,8 @@ import { gameTime } from '../sim/clock';
 import { dailySummary } from '../sim/store';
 import { weatherFor } from '../sim/weather';
 import type { createSession } from '../game/session';
+import { canNegotiate, currentDraft, findingsOf, negotiate, requestReview, reviewFee, risks, type CounselState, type Draft } from '../game/tycoon/counsel';
+import { reviewDays } from '../sim/advisors';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -32,7 +34,8 @@ const playerShop = (state: State) => {
   return lease && state.book.businesses.find(b => b.id === lease.businessId && b.closedAt === null);
 };
 const staff = (state: State, businessId: string) => state.book.employment.filter(e => e.businessId === businessId && e.leftAt === null);
-let wage = 5, reply = '', replyTo = '';
+let wage = 5, reply = '', replyTo = '', reading = ''; // storefront whose contract is open
+const counselOf = (state: State) => state.tycoon.systems.counsel as CounselState | undefined;
 
 // Status-bar extras: today's weather glyph and the latest lease's arrears warning.
 export function shopStatus(state: State) {
@@ -44,7 +47,8 @@ export function shopStatus(state: State) {
 export function shopKey(state: State) {
   const b = playerShop(state);
   return [state.leases.map(l => [l.id, l.ended, l.businessId, l.orders.filter(o => !o.delivered).length, l.reports.length]),
-    b ? staff(state, b.id).map(e => e.actorId) : []];
+    b ? staff(state, b.id).map(e => e.actorId) : [], reading,
+    counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
 const lines: Record<string, [string, string]> = {
@@ -65,10 +69,17 @@ export function shopTab(session: Session, ui: ShopUi) {
   const lease = activeLease(state), b = playerShop(state), last = state.leases.at(-1);
   if (!lease) {
     if (last?.warning === 'shop.closed.arrears') note('연체가 사흘 이어져 가게 문을 닫았어요. 남은 빚은 계속 갚아야 해요.');
-    title('빈 점포 · 계약하면 보증금을 맡겨요');
-    for (const u of storefronts) button(row(`${ui.placeName(u.placeId)} 점포`,
-      `보증금 ${u.deposit}결 · 하루 임대료 ${u.dailyRent}결 · ${u.kinds.map(k => kindNames[k]).join('·')} · 직원 ${u.capacity}명`), '계약',
-    () => { session.rentStore(u.id); return `${ui.placeName(u.placeId)} 점포를 계약했어요 (-${u.deposit}결)`; });
+    const counsel = counselOf(state);
+    for (const text of counsel?.messages.slice(-2) ?? []) note(text);
+    title('빈 점포 · 계약서를 읽고 서명하면 보증금을 맡겨요');
+    for (const u of storefronts) {
+      const line = row(`${ui.placeName(u.placeId)} 점포`,
+        `보증금 ${u.deposit}결 · 하루 임대료 ${u.dailyRent}결 · ${u.kinds.map(k => kindNames[k]).join('·')} · 직원 ${u.capacity}명`);
+      const d = counsel && currentDraft(counsel, u.id);
+      if (d) button(line, reading === u.id ? '접기' : '조항 보기', () => { reading = reading === u.id ? '' : u.id; });
+      if (d && reading === u.id) contract(counsel!, d, u);
+      else button(line, '계약', () => { session.rentStore(u.id, d?.id); return `${ui.placeName(u.placeId)} 점포를 계약했어요 (-${u.deposit}결)`; });
+    }
     return;
   }
   const unit = storefronts.find(u => u.id === lease.storefrontId)!;
@@ -124,6 +135,29 @@ export function shopTab(session: Session, ui: ShopUi) {
     make('', bar, 'span', `${r.day}일`);
   }
 
+  // C101: every article is readable from the start; the lawyer adds risk and fix lines next to the ones found.
+  function contract(counsel: CounselState, d: Draft, u: typeof storefronts[number]) {
+    const lawyer = counsel.experts.find(e => e.kind === 'lawyer')!, name = ui.residents.find(n => n.id === lawyer.npcId)?.name ?? '변호사';
+    const review = d.reviews.find(r => r.advisorId === lawyer.id), findings = findingsOf(d);
+    for (const a of d.articles) {
+      const gone = d.removed.includes(a.article), f = findings.find(f => f.clause.article === a.article);
+      const line = row(`제${a.article}조${gone ? ' · 빼기로 함' : ''}`, a.text + (f && !gone ? `\n⚠ 위험: ${risks[f.clause.kind]}`
+        + `\n수정안: ${f.fix ?? (f.negotiable ? '이 조항을 빼 달라고 하기' : '빼기 어려움')}` : ''));
+      if (a.kind && !gone) button(line, '빼 달라고 하기', () => {
+        session.tycoon.command('counsel', (c, s: CounselState) => negotiate(c, s, d.id, a.article));
+        return `제${a.article}조를 빼기로 했어요 · 하루 임대료 +1결`;
+      }, !canNegotiate(d, a.article));
+    }
+    if (d.extraRent) note(`조항을 뺀 대가로 하루 임대료 +${d.extraRent}결`);
+    const chips = make('hud-chips', body);
+    if (!review) button(chips, `변호사 ${name}에게 맡기기 (${reviewFee(lawyer)}결·${reviewDays(lawyer.tier)}일)`, () => {
+      session.tycoon.command('counsel', (c, s: CounselState) => requestReview(c, s, d.id, lawyer.id));
+      return `${name}: “계약서 받았어요. ${reviewDays(lawyer.tier)}일 뒤에 알려 드릴게요.”`;
+    });
+    else live(make('hud-sub', chips, 'span'), () => review.done ? `${name} 검토 끝 · 짚은 조항 ${review.findings.length}개`
+      : `${name} 검토 중 · ${Math.max(1, review.readyDay - gameTime(state.world.clock).day)}일 뒤 결과`);
+    button(chips, '서명', () => { session.rentStore(u.id, d.id); return `${ui.placeName(u.placeId)} 점포를 계약했어요 (-${u.deposit}결)`; });
+  }
   function hireView(businessId: string) {
     const head = make('hud-head', body);
     button(head, '‹ 가게', () => ui.hire(false));
