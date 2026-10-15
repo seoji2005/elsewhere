@@ -47,5 +47,6 @@
 6. 리세 외형 시제품(R016a 얼굴 SDF·램프·천사 고리, R010·R011 외형) — 화면 카드, 사용자 판단
 7. 경제 2단계(생성 주민 50명·가게 여러 곳, R015)
 사용자 확인 대기:
-- 제미나이 피드백 위치(GitHub에서 못 찾음)
-- 툰 방향 "확실하게": 피드백 읽은 뒤 2안 제시
+- 툰 3자 비교(C033): https://3-34-132-123.sslip.io/toon-fable.html?toon=a&cast=1&debug=1 (toon-codex·toon-opus, toon=a|b) — 판·안 선택
+- 리세 시제품(C057): https://3-34-132-123.sslip.io/lise.html?lise=1&close=1&debug=1 — 방향(오데트 그림 그대로는 불가, A 분위기만 추천)
+- R017: Neural4D AnimeArt 1개월 시험 결제 여부(비용, 사용자)
