@@ -1,3 +1,5 @@
+import { storefronts, shopKinds, shopStock, type ShopKind } from '../data/storefronts';
+import { rentStorefront, endLease, jobOffer, type Lease } from '../sim/business';
 import { npcs } from '../data/npcs';
 import { companionEvents } from '../data/companions';
 import { places } from '../data/places';
@@ -13,7 +15,7 @@ import { whereIs, validateTime } from '../sim/npc';
 import { generate } from '../sim/npcgen';
 import { createMarket, advanceDay, recordNpcRevenue } from '../sim/market';
 import { createWorkState, finishWork, startWork as beginWork } from '../sim/work';
-import { createStore, expireVisits, restock, visitStore } from '../sim/store';
+import { createStore, expireVisits, restock, visitStore, setPrice, dailySummary } from '../sim/store';
 import { createShopState, useItem, giveGift, inviteHomeTea } from '../sim/shop';
 import { createRelationshipState, relationshipStage, type DialogueChoice } from '../sim/relationship';
 import { createEncounterState } from '../sim/encounter';
@@ -85,7 +87,7 @@ function addResidents(state: ReturnType<typeof freshState>, allocate = false, op
 // Two paid five-unit batches: a full shelf and a reserve for the first night.
 function supplyDay(state: ReturnType<typeof freshState>, residents: ReturnType<typeof addResidents>) {
   const { world, book } = state, time = gameTime(world.clock);
-  for (const b of book.businesses) if (b.closedAt === null) for (const stock of b.store.stock) {
+  for (const b of book.businesses) if (b.closedAt === null && b.ownerId !== 'player') for (const stock of b.store.stock) {
     const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
     if (!producer) continue;
     for (let batch = 0; stock.backroom + stock.displayed < 10 && batch < 2; batch++) {
@@ -107,7 +109,7 @@ function freshState(npcSeed = Math.floor(Math.random() * 0x100000000)) {
   world.people = Object.fromEntries(npcs.map(n => [n.id,
     { id: n.id, name: n.name, role: 'npc' as const, placeId: whereIs(n, gameTime(world.clock)) }]));
   world.people.player = { id: 'player', name: '플레이어', role: 'player', placeId: 'nest' };
-  return { npcSeed, populationEconomy: false, reputation: { player: 0 } as Record<string, number>,
+  return { leases: [] as Lease[], npcSeed, populationEconomy: false, reputation: { player: 0 } as Record<string, number>,
     revenueHistory: {} as Record<string, Record<string, number>>,
     world, player: { x: -7, z: -6, direction: 0, placeId: 'nest' },
     ...createEconomy(world), market: createMarket(), work: createWorkState(), store: createStore('player'),
@@ -202,6 +204,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
           ripple: createRippleState(), relationMode: 'legacy' });
         if (parsed.version < 4) Object.assign(state, createEconomy(state.world));
         if (parsed.version < 5) state.populationEconomy = false;
+        state.leases ??= [];
         state.revenueHistory ??= {};
         state.reputation ??= { player: 0 };
         state.messenger ??= createMessengerState(); // saves before the messenger (C076)
@@ -249,6 +252,22 @@ export function createSession(storage: Storage, npcSeed?: number) {
         }
         const template = createEconomy(createWorld());
         checkShape(state.book, template.book);
+        for (const [index, l] of state.leases.entries()) {
+          const unit = storefronts.find(s => s.id === l.storefrontId), b = state.book.businesses.find(b => b.id === l.businessId);
+          checkShape(l, { id: '', storefrontId: '', rentedDay: 0, ended: false, arrears: 0, rentDue: [], reports: [], orders: [] });
+          if (l.id !== `lease:${index}` || !unit || !Number.isSafeInteger(l.rentedDay) || l.rentedDay < 1 ||
+              l.businessId !== null && (!b || b.ownerId !== 'player' || b.placeId !== unit.placeId || l.ended !== (b.closedAt !== null)) ||
+              state.world.ledger.balances[`${l.id}:deposit`] !== (l.ended ? 0 : unit.deposit) ||
+              !Number.isSafeInteger(l.arrears) || l.arrears < 0 || l.reports.length > 7 ||
+              !l.rentDue.every(d => Number.isSafeInteger(d) && d >= l.rentedDay && d <= state.settledDay)) throw Error('Invalid lease');
+          for (const [i, o] of l.orders.entries()) {
+            checkShape(o, { id: '', itemId: '', quantity: 0, arrival: 0, delivered: false });
+            if (o.id !== `${l.id}:order:${i}` || !b?.store.stock.some(s => s.itemId === o.itemId) ||
+                !Number.isSafeInteger(o.quantity) || o.quantity < 1 || !Number.isSafeInteger(o.arrival) || o.arrival < 1440)
+              throw Error('Invalid stock order');
+          }
+        }
+        if (state.leases.filter(l => !l.ended).length > 1) throw Error('Multiple active leases');
         const dated = (n: number) => Number.isSafeInteger(n) && n >= 0 && n <= state.economyMinute;
         if (!state.book.businesses.length || !state.book.employment.length ||
             new Set(state.book.businesses.map(b => b.id)).size !== state.book.businesses.length) throw Error('Invalid business book');
@@ -292,7 +311,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
   } catch (error) { loadResult = { ok: false, error }; }
   const residents = addResidents(state);
   for (const n of residents) state.world.people[n.id] =
-    { id: n.id, name: n.name, role: 'npc', placeId: whereIs(n, gameTime(state.world.clock)) };
+    { id: n.id, name: n.name, role: 'npc', placeId: staffPlace(n, gameTime(state.world.clock)) };
   lastSaved = state.world.clock.totalMinutes;
   const saveNow = (): SaveResult => {
     try {
@@ -303,6 +322,99 @@ export function createSession(storage: Storage, npcSeed?: number) {
       lastSaved = state.world.clock.totalMinutes;
       return { ok: true };
     } catch (error) { return { ok: false, error }; }
+  };
+  const activeLease = () => {
+    const lease = state.leases.find(l => !l.ended);
+    if (!lease) throw Error('No active lease');
+    return lease;
+  };
+  const playerShop = () => {
+    const b = state.book.businesses.find(b => b.id === activeLease().businessId && b.closedAt === null);
+    if (!b) throw Error('Shop not opened');
+    return b;
+  };
+  const shops = {
+    rentStore(storefrontId: string) {
+      const lease = rentStorefront(state.leases, state.world.ledger, storefrontId, gameTime(state.world.clock));
+      saveNow(); return lease;
+    },
+    terminateStore() { endLease(activeLease(), state.book, state.world.ledger, gameTime(state.world.clock)); saveNow(); },
+    openShop(kind: ShopKind) {
+      const lease = activeLease(), unit = storefronts.find(s => s.id === lease.storefrontId)!;
+      if (!Object.hasOwn(shopKinds, kind) || !(unit.kinds as readonly string[]).includes(kind) || lease.businessId) throw Error('Invalid shop kind');
+      const b = openBusiness(state.book, state.world.people, state.world.ledger, `shop:${lease.id}`, 'player',
+        unit.placeId, unit.capacity, shopStock(kind), gameTime(state.world.clock));
+      lease.businessId = b.id; saveNow(); return b;
+    },
+    orderStock(producerId: string, itemId: string, quantity: number) {
+      const b = playerShop(), lease = activeLease(), now = gameTime(state.world.clock);
+      const producer = residents.find(n => n.id === producerId), item = items.find(i => i.id === itemId);
+      if (!producer || !item) throw Error('Unknown supplier or item');
+      const stock = b.store.stock.find(s => s.itemId === itemId);
+      if (!Number.isSafeInteger((stock?.backroom ?? 0) + (stock?.displayed ?? 0) + quantity +
+          lease.orders.filter(o => !o.delivered && o.itemId === itemId).reduce((n, o) => n + o.quantity, 0))) throw Error('Stock overflow');
+      const id = `${lease.id}:order:${lease.orders.length}`;
+      const result = procure(state.book, state.world.people, state.world.ledger, b.id, producer, itemId,
+        quantity, Math.max(1, Math.floor(item.price / 4)), id, now);
+      if (result.ok && !result.duplicate) {
+        b.store.stock.find(s => s.itemId === itemId)!.backroom -= quantity;
+        lease.orders.push({ id, itemId, quantity, arrival: minuteOf(now) + 1440, delivered: false }); saveNow();
+      }
+      return result;
+    },
+    setShopPrice(itemId: string, price: number) { setPrice(playerShop().store, itemId, price); saveNow(); },
+    offerJob(npcId: string, hourlyWage: number) {
+      const b = playerShop(), now = gameTime(state.world.clock), npc = residents.find(n => n.id === npcId);
+      if (!npc) throw Error('Unknown resident');
+      const old = state.book.employment.find(e => e.actorId === npcId && e.leftAt === null);
+      const reason = jobOffer(readBond(state.bonds, npcId, 'player'), hourlyWage, old?.job.hourlyWage ?? 3,
+        state.book.businesses.some(b => b.ownerId === npcId && b.closedAt === null));
+      if (reason !== 'job.accept') return { accepted: false, reason };
+      if (old?.businessId === b.id || state.book.employment.filter(e => e.businessId === b.id && e.leftAt === null).length >= b.capacity)
+        return { accepted: false, reason: 'job.refuse.capacity' };
+      if (old) old.leftAt = minuteOf(now);
+      hire(state.book, state.world.people, state.world.ledger, b.id, npcId, { id: `${b.id}:staff:${state.book.employment.length}`,
+        name: npc.job, placeId: b.placeId, employerId: 'player', fromMinute: 540, toMinute: 1020, durationMinutes: 480, hourlyWage }, now);
+      saveNow(); return { accepted: true, reason };
+    },
+    fireEmployee(npcId: string) {
+      const b = playerShop(), now = gameTime(state.world.clock);
+      const e = state.book.employment.find(e => e.actorId === npcId && e.businessId === b.id && e.leftAt === null);
+      if (!e) throw Error('Not employed');
+      e.leftAt = minuteOf(now);
+      applyBondEvent(state.bonds, `fire:${e.job.id}`, now, [{ fromId: npcId, toId: 'player', delta: { trust: -10, respect: -5 } }]); saveNow();
+    },
+    shopReport() { return state.leases.map(l => ({ leaseId: l.id, warning: l.warning, arrears: l.arrears, reports: l.reports })); },
+  };
+  function staffPlace(npc: typeof residents[number], now: ReturnType<typeof gameTime>) {
+    const e = state.book.employment.find(e => e.actorId === npc.id && e.leftAt === null && e.job.employerId === 'player');
+    return e && now.hour * 60 + now.minute >= e.job.fromMinute && now.hour * 60 + now.minute < e.job.toMinute
+      ? e.job.placeId : whereIs(npc, now);
+  };
+  const settleShops = (day: number) => {
+    const now = { day, hour: 23, minute: 59 }, { world, book } = state;
+    for (const lease of state.leases) {
+      const unit = storefronts.find(s => s.id === lease.storefrontId)!, b = book.businesses.find(b => b.id === lease.businessId);
+      if (!lease.ended) lease.rentDue.push(day);
+      lease.rentDue = lease.rentDue.filter(d => !payPerson(world.people, world.ledger, { id: `${lease.id}:rent:${d}`,
+        from: 'player', to: unit.landlordId, amount: unit.dailyRent, time: now, reason: `Rent: ${lease.id}` }).ok);
+      const shifts = state.work.shifts.filter(s => s.employerId === 'player' && s.endsAt <= minuteOf(now) &&
+        book.employment.some(e => e.businessId === b?.id && e.job.id === s.jobId));
+      for (const shift of shifts) if (!shift.paid) payCompletedShift(book, world.people, world.ledger, b!.id, shift, now);
+      const unpaid = shifts.some(s => !s.paid) || lease.rentDue.length > 0;
+      lease.arrears = unpaid ? lease.arrears + 1 : 0;
+      lease.warning = unpaid ? 'shop.unpaid' : null;
+      if (!lease.ended && lease.arrears >= 3) {
+        endLease(lease, book, world.ledger, now); lease.warning = 'shop.closed.arrears';
+      }
+      const tx = world.ledger.transactions.filter(t => t.from === 'player' && t.time.day === day);
+      const sum = (predicate: (t: typeof tx[number]) => boolean) => tx.filter(predicate).reduce((n, t) => n + t.amount, 0);
+      const cost = sum(t => t.reason.startsWith(`Procurement: ${b?.id}:`)), rent = sum(t => t.reason === `Rent: ${lease.id}`);
+      const wages = sum(t => shifts.some(s => s.id === t.id));
+      const summary = dailySummary(b?.store ?? createStore('player', []), day);
+      lease.reports.push({ ...summary, cost, rent, wages, net: summary.revenue - cost - rent - wages, reputation: state.reputation.player });
+      lease.reports = lease.reports.slice(-7);
+    }
   };
   // Seed only on social requests so restoration preserves every saved edge.
   const seedAcquaintances = () => {
@@ -318,12 +430,13 @@ export function createSession(storage: Storage, npcSeed?: number) {
   const context = (npcId: string) => {
     const npc = residents.find(n => n.id === npcId);
     if (!npc) throw Error('Unknown resident');
-    const time = gameTime(state.world.clock), placeId = whereIs(npc, time);
+    const time = gameTime(state.world.clock), placeId = staffPlace(npc, time);
     const atWork = Object.entries({ office: ['빛씨 조율사', '빛고리 조율실 수석 조율사', '밤결 기록사'],
       cafe: ['잔향 차 배합사'], shop: ['공유물 순환지기'], park: ['떠오름 뜰 돌봄사'] })
-      .some(([place, jobs]) => place === placeId && jobs.includes(npc.job));
+      .some(([place, jobs]) => place === placeId && jobs.includes(npc.job)) || state.book.employment.some(e =>
+        e.actorId === npcId && e.leftAt === null && e.job.employerId === 'player' && time.hour >= 9 && time.hour < 17);
     return { market: state.player.placeId === placeId ? state.market : undefined, actorId: 'player', npc, time, value: state.world.relationships.player?.[npcId] ?? 0,
-      scene: { placeId, atWork, peopleCount: residents.filter(n => whereIs(n, time) === placeId).length
+      scene: { placeId, atWork, peopleCount: residents.filter(n => staffPlace(n, time) === placeId).length
         + Number(state.player.placeId === placeId),
       bond: state.relationMode === 'bonds' ? readBond(state.bonds, npcId, 'player') : undefined } };
   };
@@ -331,7 +444,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
     seedAcquaintances();
     const { world } = state, time = gameTime(world.clock);
     world.people.player.placeId = state.player.placeId;
-    for (const n of residents) world.people[n.id].placeId = whereIs(n, time);
+    for (const n of residents) world.people[n.id].placeId = staffPlace(n, time);
     const event = { id, actorId: 'player', targetId: npcId, time, placeId: state.player.placeId, topic, kind };
     for (const n of residents) deliverRipple(state.ripple, state.bonds, world, state.dialogue, event, n.id, time);
   };
@@ -345,14 +458,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
   };
   const requirePresent = (npcId: string) => {
     const { npc, time } = context(npcId);
-    if (whereIs(npc, time) !== state.player.placeId) throw Error('지금 여기 없어요');
+    if (staffPlace(npc, time) !== state.player.placeId) throw Error('지금 여기 없어요');
   };
   const social = {
     availableCompanions() {
       const time = gameTime(state.world.clock), minute = time.hour * 60 + time.minute;
       return companionEvents.filter(event => state.relationMode === 'bonds'
         && minute >= event.fromMinute && minute < event.untilMinute && state.player.placeId === event.placeId
-        && whereIs(residents.find(n => n.id === event.npcId)!, time) === event.placeId
+        && staffPlace(residents.find(n => n.id === event.npcId)!, time) === event.placeId
         && !state.dialogue.memories[event.npcId]?.entries.some(m =>
           m.sourceEventId === `companion:${event.id}:${time.day}`));
     },
@@ -399,7 +512,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
     inviteHomeTea(id: string, npcId: string) {
       requirePresent(npcId);
       const { npc, time } = context(npcId);
-      if (state.relationMode !== 'bonds' || state.player.placeId !== 'nest' || whereIs(npc, time) !== 'nest') return false;
+      if (state.relationMode !== 'bonds' || state.player.placeId !== 'nest' || staffPlace(npc, time) !== 'nest') return false;
       const event = inviteHomeTea(state.shop, state.world, 'player', npc, id, time, state.bonds);
       return !!event && completeShared({ ...event, status: 'completed' }, { comfort: 3, trust: 2 });
     },
@@ -472,7 +585,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       if (!['scheduled', 'offered'].includes(appointment.status) || minuteOf(appointment.time) > minuteOf(now)) continue;
       const npc = residents.find(n => n.id === appointment.npcId);
       if (npc && resolveMatch(appointment, state.encounters, npc, now,
-        { playerPlaceId: state.player.placeId, npcPlaceId: whereIs(npc, now) }) === 'met') {
+        { playerPlaceId: state.player.placeId, npcPlaceId: staffPlace(npc, now) }) === 'met') {
         applyBondEvent(state.bonds, `match-met:${appointment.id}`, now, [
           { fromId: appointment.actorId, toId: npc.id, delta: {}, met: true },
           { fromId: npc.id, toId: appointment.actorId, delta: state.relationMode === 'bonds' ? { trust: 3 } : {}, met: true },
@@ -512,7 +625,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
       const resting = hour >= 22 || hour < 6 || ['nest', 'quiet', 'high'].includes(state.player.placeId);
       life.energy = Math.max(0, Math.min(100, life.energy + ((resting && !working ? 3 : -1) - (working ? 5 : 0)) / 60));
       const payWages = () => {
-        for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute) {
+        for (const shift of state.work.shifts) if (!shift.paid && shift.endsAt <= minute && shift.employerId !== 'player') {
           shift.employerId = personalEmployer[shift.employerId] ?? shift.employerId;
           if (state.relationMode === 'bonds' && shift.actorId === 'player' && shift.endsAt === minute) {
             const job = jobs.find(j => j.id === shift.jobId)!;
@@ -530,11 +643,15 @@ export function createSession(storage: Storage, npcSeed?: number) {
             finishWork(state.work, world.ledger, shift.id, now);
         }
       };
+      for (const lease of state.leases) for (const order of lease.orders) if (!order.delivered && order.arrival <= minute) {
+        const stock = book.businesses.find(b => b.id === lease.businessId)!.store.stock.find(s => s.itemId === order.itemId)!;
+        stock.backroom += order.quantity; order.delivered = true;
+      }
       payWages();
       if (minute % 60 === 0) {
         const byPlace = new Map<string, typeof residents>();
         for (const npc of residents) {
-          const place = whereIs(npc, now), present = byPlace.get(place) ?? [];
+          const place = staffPlace(npc, now), present = byPlace.get(place) ?? [];
           present.push(npc); byPlace.set(place, present); world.people[npc.id].placeId = place;
         }
         for (const b of book.businesses) if (b.closedAt === null && b.openedAt <= minute) {
@@ -542,12 +659,14 @@ export function createSession(storage: Storage, npcSeed?: number) {
           for (const npc of byPlace.get(b.placeId) ?? []) {
             const employment = book.employment.find(e => e.businessId === b.id && e.actorId === npc.id && e.leftAt === null);
             const slots = npc.schedule[(now.day - 1) % 7];
-            const next = slots.find(slot => slot.fromMinute > minute % 1440)?.fromMinute ?? 1440;
+            const next = b.ownerId === 'player' ? 1440 : slots.find(slot => slot.fromMinute > minute % 1440)?.fromMinute ?? 1440;
             if (employment && minute % 1440 >= employment.job.fromMinute &&
                 minute % 1440 + employment.job.durationMinutes <= Math.min(next, employment.job.toMinute) &&
                 !state.work.shifts.some(s => s.actorId === npc.id && (!s.paid || Math.floor(s.startedAt / 1440) === now.day - 1)))
               startEmployeeShift(book, state.work, npc.id, b.placeId, now);
             if (npc.id === b.ownerId) continue;
+            if (b.ownerId === 'player' && (employment || !book.employment.some(e => e.businessId === b.id && e.leftAt === null &&
+                state.work.shifts.some(s => s.jobId === e.job.id && s.startedAt <= minute && s.endsAt > minute)))) continue;
             const visitId = `${b.id}:${now.day}:${npc.id}`;
             const customer: Customer = { likes: npc.likes,
               priceTolerance: 1 + choice(state.npcSeed, `tolerance:${npc.id}`) % 5 / 10, patienceMinutes: 1 };
@@ -563,7 +682,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
             }
             if (funds(world.ledger, purses[npc.id]).spendable < stock.price ||
                 dayCashflow(world.ledger, purses[npc.id], now.day).consumption + stock.price > 32) continue;
-            if (stock.backroom + stock.displayed === 0) {
+            if (b.ownerId !== 'player' && stock.backroom + stock.displayed === 0) {
               const producer = residents.find(n => n.id !== b.ownerId && n.job === businessProducerJobs[stock.itemId]);
               if (producer && stock.itemId === 'lamp') {
                 const result = payPerson(world.people, world.ledger, { id: `supply:${visitId}`, from: b.ownerId,
@@ -602,6 +721,7 @@ export function createSession(storage: Storage, npcSeed?: number) {
             (state.reputation[owner] ?? 0) + (complaints ? -2 * complaints : sales ? 1 : 0)));
         }
         for (const b of book.businesses) if (companies.some(c => c.npcId === b.ownerId)) recordNpcRevenue(state.market, b.ownerId, revenueChange(b, now.day - 1));
+        settleShops(now.day - 1);
         advanceDay(state.market); state.settledDay = now.day - 1;
         if (state.populationEconomy) supplyDay(state, residents);
         const cutoff = minute - 14 * 1440;
@@ -626,9 +746,9 @@ export function createSession(storage: Storage, npcSeed?: number) {
     const now = gameTime(state.world.clock);
     resolveMatches(now);
     deliverMessages(now);
-    for (const npc of residents) if (state.world.people[npc.id]) state.world.people[npc.id].placeId = whereIs(npc, now);
+    for (const npc of residents) if (state.world.people[npc.id]) state.world.people[npc.id].placeId = staffPlace(npc, now);
     if (state.world.people.player) state.world.people.player.placeId = state.player.placeId;
     if (days.length || state.world.clock.totalMinutes - lastSaved >= AUTOSAVE_MINUTES) return saveNow();
   };
-  return { state, loadResult, tick, saveNow, startWork, ...social };
+  return { state, loadResult, tick, saveNow, startWork, ...social, ...shops };
 }

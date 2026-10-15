@@ -1,5 +1,8 @@
 // Independent TS design inspired by Neighborly Business/Occupation and LeaveJob/BusinessClosedEvent.
 // Neighborly @ 1303cee0, MIT; no upstream code copied. Cash rules are new (see report).
+import { storefronts } from '../data/storefronts';
+import { transfer } from './ledger';
+import type { Bond } from './bonds';
 import type { Job } from '../data/jobs';
 import type { Npc } from '../data/npcs';
 import type { Stock } from '../data/stock';
@@ -107,6 +110,7 @@ export function checkoutBusiness(book: BusinessBook, people: People, ledger: Led
   return checkout(b.store, ledger, visitId, time);
 }
 export const producerJobs: Readonly<Record<string, string>> = {
+  bread: '잔향 차 배합사', lamp: '빛씨 조율사', chime: '빛씨 조율사',
   tea: '잔향 차 배합사', scarf: '공유물 순환지기', soup: '떠오름 뜰 돌봄사',
 };
 // Goods are produced on a paid order; retries never manufacture a second batch.
@@ -129,4 +133,42 @@ export function revenueChange(b: Business, day: number): number {
   if (day <= 1) return 0;
   const previous = dailySummary(b.store, day - 1).revenue;
   return previous === 0 ? 0 : Math.max(-1, Math.min(1, (today - previous) / previous));
+}
+
+export interface ShopReport extends ReturnType<typeof dailySummary> {
+  cost: number; rent: number; wages: number; net: number; reputation: number;
+}
+export interface Lease {
+  id: string; storefrontId: string; rentedDay: number; businessId: string | null; ended: boolean;
+  arrears: number; warning: string | null; rentDue: number[]; reports: ShopReport[];
+  orders: { id: string; itemId: string; quantity: number; arrival: number; delivered: boolean }[];
+}
+export function rentStorefront(leases: Lease[], ledger: LedgerState, storefrontId: string, time: GameTime): Lease {
+  const unit = storefronts.find(s => s.id === storefrontId);
+  if (!unit || leases.some(l => !l.ended)) throw Error('Storefront unavailable');
+  const id = `lease:${leases.length}`, account = `${id}:deposit`;
+  ledger.balances[account] ??= 0;
+  const paid = transfer(ledger, { id, from: 'player', to: account, amount: unit.deposit, time, reason: 'Shop deposit' });
+  if (!paid.ok) { delete ledger.balances[account]; throw Error(paid.error); }
+  const lease: Lease = { id, storefrontId, rentedDay: time.day, businessId: null, ended: false,
+    arrears: 0, warning: null, rentDue: [], reports: [], orders: [] };
+  leases.push(lease); return lease;
+}
+export function endLease(lease: Lease, book: BusinessBook, ledger: LedgerState, time: GameTime): void {
+  if (lease.ended) return;
+  const unit = storefronts.find(s => s.id === lease.storefrontId)!, account = `${lease.id}:deposit`;
+  for (const [to, amount] of [['player', unit.deposit * 0.8], [unit.landlordId, unit.deposit * 0.2]] as const) {
+    const result = transfer(ledger, { id: `${lease.id}:refund:${to}`, from: account, to, amount, time, reason: 'Shop deposit return' });
+    if (!result.ok) throw Error(result.error);
+  }
+  lease.ended = true;
+  const b = book.businesses.find(b => b.id === lease.businessId);
+  if (b) b.closedAt = minute(time);
+  for (const e of book.employment) if (e.businessId === lease.businessId && e.leftAt === null) e.leftAt = minute(time);
+}
+export function jobOffer(bond: Bond, hourlyWage: number, currentWage: number, ownsBusiness: boolean): string {
+  if (ownsBusiness) return 'job.refuse.owner';
+  if (!natural(hourlyWage) || hourlyWage < Math.max(4, currentWage + 1) || !natural(hourlyWage * 8)) return 'job.refuse.wage';
+  if (bond.trust < 15 || bond.respect < 5) return 'job.refuse.trust';
+  return 'job.accept';
 }
