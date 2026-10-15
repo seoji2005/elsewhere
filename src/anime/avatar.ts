@@ -43,14 +43,15 @@ function retarget(clip: T.AnimationClip, rig: T.Object3D, vrm: VRM, scale: numbe
 // VRoid rest bones carry no rotation (arms run along X, legs along Y), so limbs shrink along the bone and thicken
 // across it; hands and feet are counter-scaled to stay uniform. Collider and hit radii are world units, so they
 // follow their bone's world scale; the model is lowered by what the shorter legs lifted the soles.
-const SD = [[1, 1, 1, 1, 1, 1, 1, 1], [0.8, 1.8, 0.78, 1.22, 1.15, 0.74, 0.95, 1], [0.7, 2.1, 0.72, 1.35, 1.2, 0.55, 0.55, 0.7]];
+const SD = [[1, 1, 1, 1, 1, 1, 1, 1], [0.8, 1.8, 0.78, 1.22, 1.15, 0.68, 0.88, 1], [0.7, 1.85, 0.72, 1.35, 1.2, 0.31, 0.63, 0.7]];
 function proportion(vrm: VRM, sd: number) {
   const [body, head, length, girth, ends, legs, torso, calf] = SD[sd], v = new T.Vector3();
   const raw = (name: VRMHumanBoneName) => vrm.humanoid.getRawBoneNode(name)!;
   vrm.scene.updateMatrixWorld(true);
   const ankle = raw('leftFoot').getWorldPosition(v).y;
   raw('hips').scale.setScalar(body);
-  raw('head').scale.setScalar(head);
+  // Round the SD face vertically; X/Z stay wider, so the existing X-based spring radii still enclose the head.
+  raw('head').scale.set(head, head * (sd ? 0.9 : 1), head);
   // Shorten torso offsets without shrinking the head or inheriting another scale into the arms.
   for (const name of ['spine', 'chest', 'upperChest', 'neck', 'head'] as const) raw(name).position.y *= torso;
   for (const side of ['left', 'right'] as const) {
@@ -88,9 +89,9 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
   // Scale the raw rig, including clothing/spring roots; normalized animation only transfers rotations and hips position.
   const bodyScale = proportion(vrm, sd);
   const focusHeight = 1.4 * (sd ? height() / originalHeight : 1);
-  // Cache sole corners from the scaled foot geometry; foot/toe bone origins are above the soles.
+  // Cache real sole vertices near the foot bounds; box corners outside the shoe can over-lift a shortened rig.
   const contacts = sd ? (['left', 'right'] as const).flatMap(side => {
-    const bone = vrm.humanoid.getRawBoneNode(`${side}Foot`)!, toes = vrm.humanoid.getRawBoneNode(`${side}Toes`), box = new T.Box3();
+    const bone = vrm.humanoid.getRawBoneNode(`${side}Foot`)!, toes = vrm.humanoid.getRawBoneNode(`${side}Toes`), box = new T.Box3(), points: T.Vector3[] = [];
     vrm.scene.traverse(object => {
       if (!(object instanceof T.SkinnedMesh)) return;
       const indices = object.geometry.getAttribute('skinIndex'), weights = object.geometry.getAttribute('skinWeight');
@@ -101,10 +102,16 @@ export async function loadAvatar(camera: T.Camera, sd = 1, outfit: Outfit = outf
           const joint = object.skeleton.bones[indices.getComponent(i, j)];
           if (joint === bone || joint === toes) weight += weights.getComponent(i, j);
         }
-        if (weight > 0.5) box.expandByPoint(bone.worldToLocal(object.getVertexPosition(i, new T.Vector3()).applyMatrix4(object.matrixWorld)));
+        if (weight > 0.5) {
+          const point = bone.worldToLocal(object.getVertexPosition(i, new T.Vector3()).applyMatrix4(object.matrixWorld));
+          box.expandByPoint(point); points.push(point);
+        }
       }
     });
-    return [box.min.x, box.max.x].flatMap(x => [box.min.z, box.max.z].map(z => ({ bone, point: new T.Vector3(x, box.min.y, z) })));
+    return [box.min.x, box.max.x].flatMap(x => [box.min.z, box.max.z].map(z => {
+      const corner = new T.Vector3(x, box.min.y, z);
+      return { bone, point: points.reduce((a, b) => a.distanceToSquared(corner) < b.distanceToSquared(corner) ? a : b) };
+    }));
   }) : [];
   const rig = motion.scene.getObjectByName('UAL1_Standard')!;
   motion.scene.updateMatrixWorld(true);
