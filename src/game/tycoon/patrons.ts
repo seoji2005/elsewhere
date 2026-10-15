@@ -44,7 +44,7 @@ function say(ctx: TycoonCtx, s: PatronState, npcId: string, situation: Situation
 /** The player's answer to a pending haggle: accept sells one at the offered price, refuse is a lost 'expensive' sale. */
 export function answerHaggle(ctx: TycoonCtx, s: PatronState, visitId: string, accept: boolean): boolean {
   const h = s.haggles.find(h => h.visitId === visitId), b = ctx.book.businesses.find(b => b.id === h?.businessId);
-  if (!h || !b) throw Error('No haggle');
+  if (!h || !b) return false; // already answered, or the customer left
   s.haggles = s.haggles.filter(x => x !== h);
   const stock = b.store.stock.find(st => st.itemId === h.itemId);
   if (!stock) return false;

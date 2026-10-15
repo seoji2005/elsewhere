@@ -325,7 +325,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     const said = [...p!.feed].reverse().find(l => l.npcId === h.npcId && l.situation === 'haggle')?.text ?? '조금 깎아 주세요.';
     make('', ask, 'div', `${name}: “${said}”\n${items.find(i => i.id === h.itemId)?.name ?? h.itemId} ${list}결 → ${h.offer}결`);
     const reply = (accept: boolean) => () => { asked = ''; return session.tycoon.command('patrons', (c, s: PatronState) =>
-      answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔 물건이 없어요' : `${name} 님이 그냥 갔어요`; };
+      answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔지 못했어요' : `${name} 님이 그냥 갔어요`; };
     button(make('haggle-btns', ask), '깎아 주기', reply(true)); button(ask.lastElementChild as HTMLElement, '안 돼요', reply(false));
   }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
