@@ -1,4 +1,4 @@
-import { shows } from '../../data/shows';
+import { shows, type Show, type ShowScene } from '../../data/shows';
 import { places } from '../../data/places';
 import { applyBondEvent } from '../../sim/bonds';
 import { createMemoryState, minuteOf, rememberSharedEvent } from '../../sim/memory';
@@ -64,6 +64,21 @@ const memoryId = (t: Ticket) => `leisure:${t.showId}:${t.day}`;
 export function leisure(session: Session) {
   const { state } = session;
   const command = <T>(fn: (ctx: TycoonCtx, s: LeisureState) => T) => session.tycoon.command('leisure', fn);
+  const unpicked = (t: Ticket) => {
+    const now = minuteOf(session.tycoon.ctx().time);
+    return t.status === 'attended' && !t.sceneId && now >= (t.day - 1) * 1440 + showOf(t.showId)!.end;
+  };
+  const enjoy = (ctx: TycoonCtx, show: Show, scene: ShowScene, night: Ticket[]) => {
+    for (const t of night) t.sceneId = scene.id;
+    const life = state.shop.residents.player ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
+    life.energy = Math.min(100, life.energy + 15);
+    const companions = [...new Set(night.flatMap(t => t.companionId ?? []))];
+    for (const id of companions) rememberSharedEvent(state.dialogue.memories[id] ??= createMemoryState(id), {
+      id: memoryId(night[0]), actorId: 'player', kind: 'shared-work', participants: ['player', ...companions],
+      placeId: show.placeId, placeName: places.find(p => p.id === show.placeId)!.name, activityName: scene.memory,
+      time: ctx.time, status: 'completed' });
+    return scene;
+  };
   const today = () => (session.tycoon.state().systems.leisure as LeisureState).tickets
     .filter(t => t.day === session.tycoon.ctx().time.day);
   return {
@@ -77,21 +92,27 @@ export function leisure(session: Session) {
       if (!show || !scene || !night.some(t => t.status === 'attended') || ctx.player.placeId !== show.placeId
         || ctx.time.hour * 60 + ctx.time.minute >= show.end) throw Error('Not attending');
       if (night.some(t => t.sceneId)) throw Error('Already chosen');
-      for (const t of night) t.sceneId = scene.id;
-      const life = state.shop.residents.player ??= { inventory: {}, energy: 50, appearance: 0, atmosphere: 0, clothing: null, decorations: [] };
-      life.energy = Math.min(100, life.energy + 15);
-      const companions = [...new Set(night.flatMap(t => t.companionId ?? []))];
-      for (const id of companions) rememberSharedEvent(state.dialogue.memories[id] ??= createMemoryState(id), {
-        id: memoryId(night[0]), actorId: 'player', kind: 'shared-work', participants: ['player', ...companions],
-        placeId: show.placeId, placeName: places.find(p => p.id === show.placeId)!.name, activityName: scene.memory,
-        time: ctx.time, status: 'completed' });
-      return scene;
+      return enjoy(ctx, show, scene, night);
     }),
+    /** C113: the show that needs the player now — booked from 10 minutes before, or attended without a pick while it runs. */
+    due() {
+      const at = minuteOf(session.tycoon.ctx().time) % 1440;
+      for (const t of today()) {
+        const show = showOf(t.showId)!;
+        if (t.status === 'booked' && at >= show.start - 10 && at < show.end
+          || t.status === 'attended' && !t.sceneId && at >= show.start && at < show.end) return { ticket: t, show };
+      }
+    },
     /** Applies a no-show to the companion who waited; call it often, it only saves when something changed. */
     sync() {
       const s = session.tycoon.state().systems.leisure as LeisureState;
-      if (!s.tickets.some(t => t.status === 'missed')) return;
+      if (!s.tickets.some(t => t.status === 'missed' || unpicked(t))) return;
       command((ctx, s) => {
+        // C113: there to the end (e.g. a skip ran through the show) without a pick → the opening scene is the memory.
+        for (const t of s.tickets.filter(unpicked)) {
+          const show = showOf(t.showId)!;
+          enjoy(ctx, show, show.scenes[0], s.tickets.filter(x => sameNight(x, t)));
+        }
         for (const t of s.tickets.filter(x => x.status === 'missed')) {
           const id = `leisure-no-show:${memoryId(t)}:${t.companionId}`, first = !s.tickets.some(x => x.status === 'closed'
             && sameNight(x, t) && x.companionId === t.companionId);

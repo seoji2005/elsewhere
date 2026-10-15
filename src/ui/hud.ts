@@ -297,18 +297,46 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       const host = npcs.find(n => n.id === show.hostId)!, mine = () => fun.today().filter(t => t.showId === show.id);
       live(row(show.name, '').querySelector('.hud-sub')!, () => ` ${placeName(show.placeId)} ${hm(show.start)}~${hm(show.end)} · ${show.price}결 · ${host.name}`
         + (mine().length ? ` · 표 ${mine().length}장${mine().filter(t => t.companionId).map(t => ` (${npcs.find(n => n.id === t.companionId)?.name})`).join('')}` : ''));
-      const chosen = show.scenes.find(c => mine().some(t => t.sceneId === c.id));
+      const chosen = show.scenes.find(c => mine().some(t => t.sceneId === c.id)), at = now().hour * 60 + now().minute;
+      // C113: an ended show leaves one result line instead of buttons.
       if (chosen) { note(`기억: ${chosen.memory}`); continue; }
+      if (mine().some(t => t.status === 'missed' || t.status === 'closed')) { note('놓쳤어요 · 표값은 돌아오지 않아요'); continue; }
+      if (at >= show.end) { if (!mine().length) note('오늘 공연은 끝났어요'); continue; }
       if (mine().some(t => t.status === 'attended') && state.player.placeId === show.placeId) {
         const chips = make('hud-chips', body);
+        chips.dataset.show = show.id;
         for (const scene of show.scenes) button(chips, scene.name, () => `${fun.choose(scene.id).name} · 활력 +15`);
         continue;
       }
+      if (mine().length && state.player.placeId !== show.placeId && at >= show.start - 10)
+        button(make('hud-chips', body), '입장', () => enterShow(show.placeId));
       if (mine().some(t => t.status !== 'booked')) continue;
       const chips = make('hud-chips', body), friends = npcs.filter(n => n.id !== show.hostId && stage(n) !== '낯섦');
-      button(chips, '혼자 표 사기', () => { fun.buyTicket(show.id); return `${show.name} 표를 샀어요 (-${show.price}결)`; });
+      button(chips, '혼자 표 사기', () => { fun.buyTicket(show.id); return `${show.name} 표를 샀어요 (-${show.price}결) · 못 가면 환불 없어요`; });
       for (const n of friends) button(chips, `${n.name} 님과`, () => {
-        fun.buyTicket(show.id, n.id); return `${n.name} 님과 함께 갈 표를 샀어요 (-${show.price * 2}결)`; });
+        fun.buyTicket(show.id, n.id); return `${n.name} 님과 함께 갈 표를 샀어요 (-${show.price * 2}결) · 못 가면 환불 없어요`; });
+    }
+  }
+  const enterShow = (placeId: string) => { go(placeId); return `${placeName(placeId)}에 들어왔어요 · 곧 공연이 시작돼요`; };
+  // C113: a card from 10 minutes before (입장 moves the player to the venue); at the venue during the show the 결폰 opens
+  // on the scene pick once per night, which stops the clock.
+  let showBox: HTMLElement | undefined, showShown = '', showPicked = '';
+  function showUi() {
+    const d = fun.due(), here = !!d && state.player.placeId === d.show.placeId, night = d ? `${d.show.id}:${d.ticket.day}` : '';
+    showBox ??= make('haggle', patronBox);
+    const key = d && !here && showShown !== `x:${night}` ? `${night}:${d.ticket.status}` : '';
+    showBox.hidden = !key;
+    if (key && key !== showShown) {
+      showShown = key; showBox.replaceChildren();
+      const place = placeName(d!.show.placeId);
+      make('', showBox, 'div', `🎟 ${d!.show.name} ${now().hour * 60 + now().minute < d!.show.start ? `${hm(d!.show.start)} 시작` : '공연 중'} · ${place}`);
+      const btns = make('haggle-btns', showBox);
+      button(btns, '입장', () => enterShow(d!.show.placeId));
+      button(btns, '나중에', () => { showShown = `x:${night}`; });
+    }
+    if (d && here && d.ticket.status === 'attended' && showPicked !== night) {
+      showPicked = night; selected = ''; show('work');
+      body.querySelector(`[data-show="${d.show.id}"]`)?.scrollIntoView({ block: 'center' });
     }
   }
   function stocks() {
@@ -454,7 +482,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     }
   }
   function render(force = false) {
-    patronsUi(); cityUi(); soldOut();
+    patronsUi(); cityUi(); soldOut(); showUi();
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
