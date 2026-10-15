@@ -7,7 +7,8 @@ import type { WorldState } from './world';
 
 export const axes = ['affection', 'trust', 'respect', 'comfort', 'romance'] as const;
 export type Axis = typeof axes[number];
-export type Bond = Record<Axis, number> & { met: boolean; legacyScore?: number };
+export type Bond = Record<Axis, number> & { met: boolean; legacyScore?: number;
+  hurt?: { id: string; trust: number; comfort: number; resolved: boolean } };
 export interface BondEffect { fromId: string; toId: string; delta: Partial<Record<Axis, number>>; met?: true }
 export interface Bonds { version: 1; edges: Record<string, Bond>; gained: Record<string, number>; applied: string[] }
 export const createBonds = (): Bonds => ({ version: 1, edges: {}, gained: {}, applied: [] });
@@ -71,6 +72,11 @@ export function applyBondEvent(state: Bonds, id: string, time: GameTime, effects
     const key = edgeKey(fromId, toId), dayKey = JSON.stringify([fromId, toId, time.day]);
     const bond = { ...(edges[key] ?? emptyBond()) };
     const changes = axes.map(axis => clamp(bond[axis] + (delta[axis] ?? 0), axis) - bond[axis]);
+    if (changes.some(change => change < 0)) {
+      const prior = bond.hurt && !bond.hurt.resolved ? bond.hurt : bond;
+      bond.hurt = { id, trust: Math.max(prior.trust, bond.trust),
+        comfort: Math.max(prior.comfort, bond.comfort), resolved: false };
+    }
     const positive = changes.reduce((sum, change) => sum + Math.max(0, change), 0);
     const available = Math.max(0, 10 - (gained[dayKey] ?? 0));
     const factor = positive ? Math.min(1, available / positive) : 1;
@@ -82,5 +88,19 @@ export function applyBondEvent(state: Bonds, id: string, time: GameTime, effects
   state.edges = edges;
   state.gained = gained;
   state.applied.push(id);
+  return true;
+}
+// Restitution restores losses; only the two extra points consume the daily growth budget.
+export function reconcileBond(state: Bonds, from: string, to: string, time: GameTime): boolean {
+  minuteOf(time);
+  const bond = readBond(state, from, to), hurt = bond.hurt;
+  if (!hurt || hurt.resolved) return false;
+  const trust = clamp(Math.max(bond.trust, hurt.trust) + 1, 'trust');
+  const comfort = clamp(Math.max(bond.comfort, hurt.comfort) + 1, 'comfort');
+  const bonus = trust - Math.max(bond.trust, hurt.trust) + comfort - Math.max(bond.comfort, hurt.comfort);
+  const key = JSON.stringify([from, to, time.day]), gained = state.gained[key] ?? 0;
+  if (gained + bonus > 10) return false;
+  state.edges[edgeKey(from, to)] = { ...bond, trust, comfort, met: true, hurt: { ...hurt, resolved: true } };
+  state.gained[key] = gained + bonus;
   return true;
 }
