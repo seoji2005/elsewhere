@@ -13,6 +13,7 @@
 - 2026-10-15 새벽 · SD 브랜치 cl/c023: C038 카메라·머리카락, C039·C041 접지(앞서 귀엽게 보인 sd=1은 다리가 묻힌 착시였음) → 체험판 갱신. R016a·R016b 리세 렌더링·텍스처 규격. 모델 기록 첫 경향(로직 medium)
 - 2026-10-15 새벽 · 플레이 시나리오 3종(C047·C049, C048 탭 씹힘 수정), Codex astra 교차 리뷰 6건 → C050 버그 5개, C051 관계 축 성장(20일에 교제 도달, 대화만은 아는 사이 — 마스터 결정), C052·C053 결폰 관계 버튼
 - 2026-10-15 새벽 · 교차 리뷰 2(화면·세션) 6건 → C054·C055 수정(즉시 저장, 위치·장소 일치, 소개팅 중복, legacy 고백, 노쇼 효과, 동석 검사). 테스트 229 + 플레이 시나리오 3
+- 2026-10-15 저녁 · C063 리세 lise-c(마스터 Blender 9라운드, ?model=lise-c), C067 뉴욕풍 건물 6종+?block=1, C070 빌드 용량 931KB 절감 → 모두 main 합침(빌드 9674KB). 체험판 https://3-34-132-123.sslip.io/main.html
 
 ## 이어받기 (새 마스터 세션용, 2026-10-15 19시)
 **지금 상태 (main, 테스트 230 + 플레이 시나리오 3, elsewhere에 푸시됨)**
@@ -20,15 +21,14 @@
 - 그래픽 main: 툰 fable A + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선). 캐릭터 6.5~7등신(VRoid 원비율). 도구: tools/style-sheet.mjs(검사 시트), tools/normalize.mjs(C066 에셋 스타일 변환기), shot.mjs @cam 수정(C068).
 - 문서: docs/look/STYLE.md(아트 바이블, §10 보강; 참고 그림은 예시일 뿐), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
 **사용자 결정(10-15)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감. 기능 제안 8개 승인. 화풍 12종 중 10번 과슈 최고, 2·3·4 다음. 캐릭터를 제대로 만들고 싶다(지금 최우선).
-**열린 작업(2026-10-15 20:40, 워크트리 커밋 안 됨)**
-- cl/c063 /home/dev/game-wt/c063: 리세 lise-c 완료(마스터가 Blender 직접, 9라운드 .shots/c063-r1~r9, 재현 tools/blender/lise_vroid.py 370줄, src/assets/lisec.vrm 712KB, ?model=lise-c). 남은 것: 빌드 10311KB > 10240KB → C070 뒤 합침. 렌더는 xvfb 창 모드(-b는 EGL 없음), Blender는 한 번에 하나(3.8GB, 19:12 OOM으로 전 세션 재시작).
-- cl/c067 /home/dev/game-wt/c067: 건물 6종+?block=1 완료(작업자 보고 ~/ops/workers/c067-r2.json, 빌드 9763KB). sim 180일 테스트 시간 초과만(서버 부하). C070 뒤 합침.
-- cx/c070 /home/dev/game-wt/c070: Codex 빌드 용량 ≥900KB 확보(people.glb 모션 분리 등). 끝나면 main 합침 → C063·C067 합침.
+**열린 작업(2026-10-15 21:10)**
+- cx/c071 /home/dev/game-wt/c071: Codex — play social 시나리오 흔들림(탭 대기 시간 초과) 원인. Codex 샌드박스는 브라우저를 못 띄움 → 마스터가 5회 반복 검증.
 - cl/c069 /home/dev/game-wt/c069: 과슈풍 ?look=gouache (커밋됨, main 미합침). 사용자 과슈/툰 선택 대기. 체험판 https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1
+- 리세 남은 한계: 코트 라펠 없음(스탠드 칼라), 플리츠 약함, VRoid 기본 얼굴(설정화의 반쯤 감은 눈 아님). 재현: tools/blender/lise_vroid.py, 렌더는 xvfb 창 모드(-b는 EGL 없음), Blender 한 번에 하나(3.8GB).
 **대기 중(사용자)**
 - 3자 비교: Meshy·Tripo 무료로 https://3-34-132-123.sslip.io/gen/lise-input-183825/ 1번 그림 → GLB를 elsewhere incoming/에 업로드. 오면 C063 결과와 같은 장면에 나란히(얼굴·실루엣·걷기·툰/과슈·용량 점수표).
 - 과슈 vs 툰 선택.
-**다음 할 일**: C063 검수·완성 → 3자 비교 → 주민 옷 부품 세트(직업 6~8종) → 생성 주민 50명. 화풍 결정 뒤 C069 합침·굵은 붓질·2D 초상. C067 합침 → 장소 A~E를 실제 장소로.
+**다음 할 일**: 3자 비교(GLB 오면) → 주민 옷 부품 세트(직업 6~8종, lise_vroid.py 방식) → 생성 주민 50명. 화풍 결정 뒤 C069 합침·굵은 붓질·2D 초상. ?block=1 거리를 장소 A~E 실제 장소로.
 **운영 메모**
 - 이미지 생성: ~/ops/bin/gha-gen <이름> <요청.json> (GitHub Actions + Gemini, 키는 저장소 비밀값 GEMINI_API_KEY, 갤러리 /gen/<이름>/). 요청 예시 ~/ops/gen/*.json.
 - Blender: /usr/local/bin/blender 4.2(dev에 VRM Add-on·Building Tools). Blender MCP(서버 blender, dev·xvfb) — 새 세션은 mcp__blender__* 도구로 직접. get_addon_status는 설정 모듈 오류(무시 가능), generate_3d는 과금될 수 있어 쓰지 않음.
