@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { buildCorner } from './scene/corner';
 import { buildBlock } from './scene/block';
+import { buildTown } from './scene/town';
 import { applyLook } from './scene/looks';
 import { cornerLighting } from './render/lighting';
 import { cornerAtmosphere } from './render/atmosphere';
@@ -25,7 +26,7 @@ import { paint } from './scene/props';
 import { createSession } from './game/session';
 import { localStorageAdapter } from './game/storage';
 import { npcs } from './data/npcs';
-import { doors } from './data/doors';
+import { doors as cornerDoors, townDoors } from './data/doors';
 import { generate } from './sim/npcgen';
 
 const query = new URLSearchParams(location.search);
@@ -57,7 +58,9 @@ renderer.outputColorSpace = T.SRGBColorSpace;
 renderer.domElement.style.cssText = 'display:block;width:100vw;height:100vh';
 document.body.appendChild(renderer.domElement);
 const block = query.get('block') === '1'; // C067: the building-kit test street instead of the corner
-const [world, character] = await Promise.all([block ? buildBlock(scene) : buildCorner(scene),
+const town = !block && query.get('town') === '1'; // C077: the seven places on one kit block, each with its door
+const doors = town ? townDoors : cornerDoors;
+const [world, character] = await Promise.all([block ? buildBlock(scene) : town ? buildTown(scene) : buildCorner(scene),
   anime ? loadAvatar(camera, sd, query.get('model') === 'lise-c' ? LISE_C : outfits[0]) : loadCharacter()]);
 const cast: Awaited<ReturnType<typeof loadAvatar>>[] = [];
 if (anime && query.get('cast') === '1') {
@@ -86,6 +89,7 @@ const player = session.state.player;
 character.group.position.set(player.x, 0, player.z);
 character.group.rotation.y = player.direction;
 if (block) character.group.position.set(-16, 0, -7); // south sidewalk, between the shops
+if (town) character.group.position.set(-24.5, 0, -6.6); // south sidewalk between 빛고리 조율실 and 모아결 교환소
 let origin = doors.find(d => d.placeId === player.placeId)?.position ?? { x: player.x, z: player.z };
 function syncPosition() {
   const at = character.group.position;
