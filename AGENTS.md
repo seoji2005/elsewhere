@@ -58,6 +58,12 @@
 - 통과한 기능을 더 다듬는 것은 새 항목이다(사용자 승인).
 - 리서치는 지금 또는 다음 카드에 필요한 **질문 하나**로 시작한다. 대상은 최대 3개, 답을 얻으면 끝낸다. 결과는 작고 독립된 후보 모듈로. 다음 1~2개 카드에 쓰지 않을 리서치는 하지 않는다.
 
+## Blender 제작 원칙 (사용자 2026-10-15)
+1. 소체 보존 + SD 변형: 기본 도형(구·원기둥·상자)으로 캐릭터를 0부터 빚지 않는다. /home/dev/asset-packs/vroid-cc0/의 CC0 VRM을 불러와 얼굴·표정 블렌드셰이프·아머처를 그대로 유지하고, 본 스케일이나 Lattice로 SD 비율을 잡은 뒤 Apply as Rest Pose로 굽는다(셰이프 키가 깨지지 않게).
+2. 의상은 몸통 복제 + 모디파이어 체인: 몸통 상·하체 폴리곤 복제 → Shrinkwrap → Solidify(offset=1.0) → 밑단·소매만 Extrude → Corrective Smooth → Data Transfer(POLYINTERP_NEAREST, VGROUP_WEIGHTS)로 원본 웨이트 복사. 좌표를 찍어 옷을 만들지 않는다.
+3. 머리카락·리본·장식은 BezierCurve(제어점 3~4) + bevel_object·taper_object → convert(target=MESH). 건물·소품은 Bevel(segments=2) + Weighted Normal + 정점 컬러 AO 베이크.
+4. 4방향 프리뷰 검수 루프: GLB/VRM으로 끝내기 전에 정면·45도·측면·얼굴 클로즈업 PNG를 렌더하고, 마스터가 직접 보고(클리핑·비율·각진 모서리) 최소 2회 고친 뒤 통과시킨다.
+
 ## 지킬 것
 - 저장소 코드와 Codex는 `dev` 계정으로만 실행한다.
 - 테스트를 지우거나 고쳐서 통과시키지 않는다. `features.json`은 `passes`만 바꾼다. "재미" 항목은 사용자만 통과시킨다.
