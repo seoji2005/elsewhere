@@ -21,10 +21,11 @@
 - 그래픽 main: 툰 fable A + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선). 캐릭터 6.5~7등신(VRoid 원비율). 도구: tools/style-sheet.mjs(검사 시트), tools/normalize.mjs(C066 에셋 스타일 변환기), shot.mjs @cam 수정(C068).
 - 문서: docs/look/STYLE.md(아트 바이블, §10 보강; 참고 그림은 예시일 뿐), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
 **사용자 결정(10-15)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감. 기능 제안 8개 승인. 화풍 12종 중 10번 과슈 최고, 2·3·4 다음. 캐릭터를 제대로 만들고 싶다(지금 최우선).
-**열린 작업(2026-10-15 21:10)**
-- cx/c071 /home/dev/game-wt/c071: Codex — play social 시나리오 흔들림(탭 대기 시간 초과) 원인. Codex 샌드박스는 브라우저를 못 띄움 → 마스터가 5회 반복 검증.
-- cl/c069 /home/dev/game-wt/c069: 과슈풍 ?look=gouache (커밋됨, main 미합침). 사용자 과슈/툰 선택 대기. 체험판 https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1
-- 리세 남은 한계: 코트 라펠 없음(스탠드 칼라), 플리츠 약함, VRoid 기본 얼굴(설정화의 반쯤 감은 눈 아님). 재현: tools/blender/lise_vroid.py, 렌더는 xvfb 창 모드(-b는 EGL 없음), Blender 한 번에 하나(3.8GB).
+**열린 작업(야간 계획, 2026-10-15 22:20 — 사용자: 주간 한도 남으니 최대한 많이)**
+- 클라우드 Claude 세션(AGENTS.md "클라우드 작업자"): C073 테스트(cx/c073), C076 메신저(cl/c076), C077 ?town=1(cl/c077), C078 기능 검증(cl/c078), Blender 시험. 끝나면 fetch → 검수 → 합침(C077은 그래픽 시안이라 사용자 승인 전 main 기본 화면 불변).
+- 서버 Codex: C074(M2-08) → C075(M2-05) → M2-06 카드 작성 후 실행. 교차 리뷰 3(astra) 결과로 버그 카드.
+- C073 합친 뒤: 날씨 표시·가게 가격 설정 화면 카드(클라우드). 클라우드 Blender 되면 Blender 일도 클라우드로.
+- 한도: 5h 60% 넘으면 새 클라우드 세션 opus만·80% 넘으면 중단, 주간은 10/18 00시 초기화.
 **대기 중(사용자)**
 - 3자 비교: Meshy·Tripo 무료로 https://3-34-132-123.sslip.io/gen/lise-input-183825/ 1번 그림 → GLB를 elsewhere incoming/에 업로드. 오면 C063 결과와 같은 장면에 나란히(얼굴·실루엣·걷기·툰/과슈·용량 점수표).
 - 과슈 vs 툰 선택.
