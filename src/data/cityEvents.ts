@@ -8,6 +8,8 @@ export const roadworks = {
 /** 근처 주차장 제휴: 실제 운영자 계정, 2칸, 하루 2결, 편도 도보 3분. */
 export const partnerLot = { id: 'park-lot', operatorId: 'iri', spaces: 2, perDay: 2, walk: 3 } as const;
 export const taxRate = 5; // %, 참여 소매점의 완료 판매
+/** C107: 신규 사업자 매출세 면제 기간(개업일 포함 7일). */
+export const taxHoliday = 7;
 /** 새 세계만: 기존 사업자 네 명이 이미 낸 세금(70씩)과 시 운영비 출연(합계 80). */
 export const preparedCity = { operating: 80, payers: ['nuel', 'sori', 'iri', 'aro'], paid: 70 } as const;
 export const cityLines = {

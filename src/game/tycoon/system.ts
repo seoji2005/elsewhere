@@ -27,6 +27,8 @@ export interface TycoonCtx {
   placeOf(npcId: string): string;
   /** Other systems' states: read only. */
   systems: Readonly<Record<string, unknown>>;
+  /** C107: hands an outcome decided outside the minute loop (an accepted haggle) to every system's onShopEvent, in registry order. */
+  shopEvent?(e: ShopEvent): void;
 }
 
 /** One tycoon feature. State must be JSON-serialisable; create must not move money. */
@@ -48,6 +50,8 @@ export interface TycoonSystem<S> {
    * Must not change state or move money: it is a query and may be skipped when the visit is decided otherwise.
    */
   visitBonus?(ctx: TycoonCtx, s: S, v: { npcId: string; businessId: string; hour: number }): number;
+  /** C107: true forbids this visit outright, checked before any visitBonus so no bonus (ads) can outweigh it. Same query rules. */
+  blocksVisit?(ctx: TycoonCtx, s: S, v: { npcId: string; businessId: string; hour: number }): boolean;
   /**
    * Called once per outcome at the player's shop (purchase, complaint, haggle, full parking), in registry order.
    * Use it to observe demand (ads: 'came from ad' lines, rivals: lost sales, staff: closing report). Read only on the shop.

@@ -36,8 +36,8 @@ try {
     return (Number(day) - 1) * 24 + Number(h);
   });
   await reload('state.world.clock.minutesPerSecond = 120;'); // to 07:00 on day 1, then real pace
-  await page.locator('.hud-open:not(.hud-skip)').tap(); // C094: the clock stops while the 결폰 is open; the reload reopens it
-  await page.waitForFunction(() => /^1일째 0[78]/.test(document.querySelector('.hud-status span').textContent), null, { timeout: 60_000 });
+  await page.locator('.hud-open:not(.hud-skip):not(.hud-mute)').tap(); // C094: the clock stops while the 결폰 is open; the reload reopens it
+  await page.waitForFunction(() => /^1일째 (0[7-9]|1[0-4])/.test(document.querySelector('.hud-status span').textContent), null, { timeout: 60_000 }); // producer hours; at ~1fps SwiftShader a frame can skip 2+ game hours
   await reload(`state.world.clock.minutesPerSecond = 1; state.bonds.edges[JSON.stringify(['velo', 'player'])] =
     { affection: 40, trust: 30, respect: 20, comfort: 20, romance: 0, met: true };`);
   await panel.locator('.hud-row').filter({ hasText: '교환소 점포' }).getByRole('button', { name: '계약' }).tap();
@@ -74,7 +74,7 @@ try {
 
   step = '진열 · 판매';
   await reload('state.world.clock.minutesPerSecond = 120;');
-  await page.locator('.hud-open:not(.hud-skip)').tap(); // C094: close the 결폰 so the clock runs
+  await page.locator('.hud-open:not(.hud-skip):not(.hud-mute)').tap(); // C094: close the 결폰 so the clock runs
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('vworld.session')).state.book.businesses
     .find(b => b.id === 'shop:lease:0').store.events.some(e => e.reason === 'purchased'), null, { timeout: 90_000, polling: 1000 });
   assert.deepEqual(errors, [], '시나리오 중 브라우저 오류가 없어야 함');

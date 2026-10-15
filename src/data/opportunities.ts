@@ -19,14 +19,9 @@ export interface OpportunityDef {
   next: string;
 }
 
-// 고객 사업자의 주문 기록(최소형; C103의 AI 계약과 공유할 자료). 메시지로 주문을 받는 직업만, 하루 한 번 굴린다.
-export const orderKinds = ['missingOrder', 'duplicateOrder', 'changedOrder'] as const;
-export type OrderKind = typeof orderKinds[number];
-export const orderClients = {
-  jobs: ['공유물 순환지기', '잔향 차 배합사'] as readonly string[],
-  chance: { missingOrder: 0.3, duplicateOrder: 0.2, changedOrder: 0.25 } as Record<OrderKind, number>,
-  keepDays: 3,
-};
+// 고객 사업자의 주문 기록은 C103 AI 계약 자료와 함께 쓴다.
+import { orderClients } from './aiContracts';
+export { orderClients, orderKinds, type OrderKind } from './aiContracts';
 
 export const opportunities: readonly OpportunityDef[] = [{
   id: 'ai-order-cleanup', industry: 'ai', source: 'customer', title: '주문 정리 도와주기',
