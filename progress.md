@@ -14,19 +14,21 @@
 - 2026-10-15 새벽 · 플레이 시나리오 3종(C047·C049, C048 탭 씹힘 수정), Codex astra 교차 리뷰 6건 → C050 버그 5개, C051 관계 축 성장(20일에 교제 도달, 대화만은 아는 사이 — 마스터 결정), C052·C053 결폰 관계 버튼
 - 2026-10-15 새벽 · 교차 리뷰 2(화면·세션) 6건 → C054·C055 수정(즉시 저장, 위치·장소 일치, 소개팅 중복, legacy 고백, 노쇼 효과, 동석 검사). 테스트 229 + 플레이 시나리오 3
 
-## 이어받기 (새 마스터 세션용, 2026-10-15 16시)
+## 이어받기 (새 마스터 세션용, 2026-10-15 19시)
 **지금 상태 (main, 테스트 230 + 플레이 시나리오 3, elsewhere에 푸시됨)**
-- 게임 루프: 세션·자동 저장, 결폰(주민·만남/일·소비/결증·장소), 대화 반신 클로즈업, 관계 5축(대화만으론 아는 사이, 함께 일·차·약속으로 친구, 내 마음 직접 선택, 20일에 교제 가능), 소문·회상, 개인 경제(지갑·가게 4곳·재입고·주가 연동), 세이브 압축.
-- 그래픽: 툰 fable A(사용자 선택) + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선, 그늘 곱 1회). 캐릭터 기본 6.5~7등신(VRoid 원비율, 사용자). 기준 장면 후보 docs/look/golden-candidate-c065.png(spot=C dusk).
-- 문서: docs/look/STYLE.md(아트 바이블; 참고 5장은 예시일 뿐 고정 아님 — 사용자), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
-**사용자 결정(오늘)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감이 목표. 기능 제안 8개 승인. 과금은 Gemini 이미지 API만(키는 저장소 비밀값 GEMINI_API_KEY, ~/ops/bin/gha-gen으로 GitHub Actions 생성 → 갤러리).
-**대기 중**: 과슈풍 vs 툰 선택(C069, https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1, 브랜치 cl/c069). 그 전 단계: 이미지 2차(같은 장면 12화풍, https://3-34-132-123.sslip.io/gen/batch2-154742/) 사용자 선택 → 그 화풍으로 소품·건물·캐릭터 시트 생성 → Blender로 제작.
-**다음 할 일**
-1. 화풍 선택 반영(STYLE.md 갱신) → 소품·건물 시트 3차 생성.
-2. 뉴욕풍 블록 실제 제작(C067): Building Tools(설치됨) + 변환기(tools/normalize.mjs, C066) + STYLE §5 상자 금지 4요소·영어 가상 간판·군중·3단 스카이라인. 장소 A~E를 진짜 장소로.
-3. 리세 재개(C063 카드): VRoid 소체 + VRM Add-on + 4원칙, 6.5~7등신.
-4. C065 남은 것: 하늘 위색 고도, 밤 순검정, 창 켜짐 비율, 먼 선 안개 페이드, shot.mjs @cam 버그, gha-shots 빈 쿼리 버그.
+- 게임 루프: 세션·자동 저장, 결폰(주민·만남/일·소비/결증·장소), 대화 반신 클로즈업, 관계 5축(대화만으론 아는 사이, 함께 일·차·약속으로 친구, 내 마음 직접 선택), 소문·회상, 개인 경제(지갑·가게 4곳·재입고·주가), 세이브 압축.
+- 그래픽 main: 툰 fable A + C065 공통 규칙(?time=day|dusk|night, ?spot=A..E, 인물·배경 같은 선). 캐릭터 6.5~7등신(VRoid 원비율). 도구: tools/style-sheet.mjs(검사 시트), tools/normalize.mjs(C066 에셋 스타일 변환기), shot.mjs @cam 수정(C068).
+- 문서: docs/look/STYLE.md(아트 바이블, §10 보강; 참고 그림은 예시일 뿐), AGENTS.md(Blender 제작 4원칙, fable 동시 2개, 모델 기록 ~/ops/model-log.tsv).
+**사용자 결정(10-15)**: 뉴욕풍 가상 도시, 6.5~7등신, 세계 전체 통일감. 기능 제안 8개 승인. 화풍 12종 중 10번 과슈 최고, 2·3·4 다음. 캐릭터를 제대로 만들고 싶다(지금 최우선).
+**열린 작업(워크트리, 커밋 안 됨 — 결과 확인 필요)**
+- cl/c063 /home/dev/game-wt/c063: 리세 VRoid 소체 + 4원칙(Blender MCP). 1라운드 4방향 렌더 .shots/c063-r1-*.png → 마스터 검수 2회 이상 → VRM 내보내기 → ?model=lise-c. 카드 cards/C063.md.
+- cl/c067 /home/dev/game-wt/c067: 뉴욕풍 건물 6종 + ?block=1 시험 블록. 카드 cards/C067.md.
+- cl/c069 /home/dev/game-wt/c069: 과슈풍 ?look=gouache (커밋됨, main 미합침). 사용자 과슈/툰 선택 대기. 체험판 https://3-34-132-123.sslip.io/gouache.html?look=gouache&spot=C&time=dusk&debug=1
+**대기 중(사용자)**
+- 3자 비교: Meshy·Tripo 무료로 https://3-34-132-123.sslip.io/gen/lise-input-183825/ 1번 그림 → GLB를 elsewhere incoming/에 업로드. 오면 C063 결과와 같은 장면에 나란히(얼굴·실루엣·걷기·툰/과슈·용량 점수표).
+- 과슈 vs 툰 선택.
+**다음 할 일**: C063 검수·완성 → 3자 비교 → 주민 옷 부품 세트(직업 6~8종) → 생성 주민 50명. 화풍 결정 뒤 C069 합침·굵은 붓질·2D 초상. C067 합침 → 장소 A~E를 실제 장소로.
 **운영 메모**
-- Blender MCP: 사용자 등록(서버 blender, dev·xvfb). 이 메모를 쓴 세션엔 도구가 없어 claude -p 명령에 --allowedTools mcp__blender를 붙여 사용. 새 세션엔 바로 보임.
-- 자동 모드는 권한 부여·설정 수정·외부 전송을 막는다 → 한 번 막히면 재시도 말고 사용자에게.
-- 서버 2코어: 동시 작업 많으면 테스트 시간 초과(환경). 180일 테스트 60초 제한.
+- 이미지 생성: ~/ops/bin/gha-gen <이름> <요청.json> (GitHub Actions + Gemini, 키는 저장소 비밀값 GEMINI_API_KEY, 갤러리 /gen/<이름>/). 요청 예시 ~/ops/gen/*.json.
+- Blender: /usr/local/bin/blender 4.2(dev에 VRM Add-on·Building Tools). Blender MCP(서버 blender, dev·xvfb) — 새 세션은 mcp__blender__* 도구로 직접. get_addon_status는 설정 모듈 오류(무시 가능), generate_3d는 과금될 수 있어 쓰지 않음.
+- 자동 모드는 권한 부여·설정 수정·외부 전송을 막는다 → 한 번 막히면 재시도 말고 사용자에게. 서버 2코어: 동시 작업 많으면 테스트 시간 초과(환경).
