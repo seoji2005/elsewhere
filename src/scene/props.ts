@@ -30,14 +30,17 @@ export function paint(width: number, height: number, draw: (g: CanvasRenderingCo
 }
 
 // Blade sign: warm lettering on a dark board, unlit so it reads at dusk and feeds the bloom.
+// Vertical columns of letters, one per space-separated word, read right to left like a Korean hanging sign.
 function sign(scene: T.Scene, text: string, x: number, y: number, z: number) {
-  const texture = paint(128, 256, g => {
-    g.fillStyle = '#23343a'; g.fillRect(0, 0, 128, 256);
-    g.strokeStyle = '#d9b77a'; g.lineWidth = 6; g.strokeRect(8, 8, 112, 240);
+  const columns = text.split(' ').reverse(), rows = Math.max(...columns.map(word => word.length));
+  const w = 16 + 80 * columns.length, h = Math.max(256, 60 + 76 * rows);
+  const texture = paint(w, h, g => {
+    g.fillStyle = '#23343a'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#d9b77a'; g.lineWidth = 6; g.strokeRect(8, 8, w - 16, h - 16);
     g.fillStyle = '#ffe2a8'; g.font = 'bold 64px sans-serif'; g.textAlign = 'center';
-    [...text].forEach((letter, i) => g.fillText(letter, 64, 96 + i * 76));
+    columns.forEach((word, c) => [...word].forEach((letter, i) => g.fillText(letter, 48 + 80 * c, 96 + i * 76)));
   });
-  const box = new T.BoxGeometry(0.08, 1.5, 0.75); // faces ±x carry the lettering: two groups = two draw calls
+  const box = new T.BoxGeometry(0.08, 1.5 * h / 256, 0.75 * w / 128); // faces ±x carry the lettering: two groups = two draw calls
   box.clearGroups(); box.addGroup(0, 12, 0); box.addGroup(12, 24, 1);
   const board = new T.Mesh(box, [new T.MeshBasicMaterial({ map: texture, color: new T.Color(1.6, 1.6, 1.6) }),
     new T.MeshLambertMaterial({ color: '#2a2622' })]);
@@ -93,7 +96,7 @@ export async function streetProps(scene: T.Scene, city: T.Group, heroes: T.Objec
   awnings.computeBoundingSphere();
   scene.add(awnings);
   sign(scene, '카페', -19.5, 4.4, facade(-19.5) + 0.42);
-  sign(scene, '서점', -12.6, 3.4, facade(-12.6) + 0.42);
+  sign(scene, '잔물결 찻방', -12.6, 3.4, facade(-12.6) + 0.42); // the tea house behind the cafe door (data/places)
   const seats = instances(scene, find(street, 'bench'), new T.Vector3(3.6, 1.8, 1.8),
     [[-19.5, facade(-19.5) + 0.75, Math.PI], [-28.6, facade(-28.6) + 0.75, Math.PI]]);
   const pots = instances(scene, find(street, 'pottedPlant'), new T.Vector3(1.7, 1.7, 1.7),

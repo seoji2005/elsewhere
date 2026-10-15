@@ -8,6 +8,7 @@ import { cornerLighting } from './render/lighting';
 import { cornerAtmosphere } from './render/atmosphere';
 import { adaptiveResolution } from './render/resolution';
 import { CheapBloom } from './render/cheapBloom';
+import { ToonEdges } from './render/outline';
 import { duskLUT } from './render/duskLUT';
 import { loadCharacter } from './player/character';
 import { loadAvatar } from './anime/avatar';
@@ -29,6 +30,8 @@ const query = new URLSearchParams(location.search);
 const anime = query.get('style') !== 'current', day = anime && query.get('time') !== 'dusk';
 const sd = ['0', '1', '2'].includes(query.get('sd') ?? '') ? Number(query.get('sd')) : 2; // user 2026-10-15: 2.7 heads
 const look = !anime && query.get('look') === 'a' ? 'a' : 'b';
+// Anime city plans (C033): toon=a hard cel with screen-space outlines (default), toon=b soft illustration.
+const toon = query.get('toon') === 'b' ? 'b' : 'a';
 // Phone measurement switches (?debug=1 shows fps, render height, draw calls, triangles):
 // msaa=0|4, bloom=0|1, lut=0|1, shadow=off|static|dynamic, dpr=<fixed pixel ratio>.
 // A switch given in the URL is left alone by the automatic quality ladder.
@@ -36,7 +39,7 @@ const msaa = Number(query.get('msaa') ?? (look === 'a' ? 4 : 0)) > 0 ? 4 : 0;
 const bloom = query.get('bloom') !== '0', grade = query.get('lut') === '1' || (!anime && query.get('lut') !== '0');
 const shadow = (['off', 'static', 'dynamic'] as const).find(mode => mode === query.get('shadow')) ?? 'static';
 const fixedDpr = Number(query.get('dpr')) > 0 ? Math.min(4, Number(query.get('dpr'))) : undefined;
-const post = look === 'b' && (bloom || grade);
+const post = look === 'b' && (bloom || grade || (anime && toon === 'a')); // A's outline pass needs the composer
 const scene = new T.Scene();
 const camera = new T.PerspectiveCamera(50, 1, 0.1, 400);
 const renderer = new T.WebGLRenderer({ antialias: !post && msaa > 0 });
@@ -55,7 +58,7 @@ if (anime && query.get('cast') === '1') {
   // Sequential cloning also lets every copy reuse the first copy's compact morph geometry.
   for (let i = 1; i < outfits.length; i++) cast.push(await loadAvatar(camera, sd, outfits[i], i * 0.47));
 }
-applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6);
+applyLook(scene, anime ? 'anime' : look, day ? 0.25 : 1.6, toon, day ? 3.2 : 3); // sun power as set below
 if (day) scene.traverse(object => { if (object.name === 'glow') object.visible = false; }); // lamp bulbs and pools
 // Added after the look pass so look A/B never retints the player.
 scene.add(character.group);
@@ -114,7 +117,7 @@ if (blob) cast.forEach(person => {
   scene.add(contact);
 });
 // Comparison shots: ?dist=3.5&pitch=0.25 start view (close-up, sky in view); ?move=-0.5|-1 walks / runs toward the camera.
-controls.state.dist = Number(query.get('dist')) || controls.state.dist;
+controls.state.dist = Number(query.get('dist')) || (anime ? 10 : controls.state.dist); // telephoto: stand further back
 controls.state.pitch = Number(query.get('pitch')) || controls.state.pitch;
 const move = Number(query.get('move')) || 0;
 const follow = followPlayer(character.group, camera, world,
@@ -122,7 +125,7 @@ const follow = followPlayer(character.group, camera, world,
 // Anime: the sun comes from behind the default view, so the façades in sight are lit and shadows fall away.
 const sunElevation = day ? 36 : 11, toSun = new T.Vector3(...anime ? [0.45, 0, 0.9] : [-0.8, 0, 0.6]);
 toSun.y = Math.tan(sunElevation * Math.PI / 180) * Math.hypot(toSun.x, toSun.z);
-const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 55, 1024, shadow, toSun);
+const lighting = cornerLighting(scene, renderer, new T.Vector3(-8, 0, -10), 22, 1024, shadow, toSun); // follows the player
 lighting.fill.intensity = look === 'a' ? 0.85 : 1.7;
 if (anime) { // warm-white afternoon sun over a sky-blue fill, or a low orange sun under a lavender sky
   lighting.sun.color.set(day ? '#fff0d9' : '#ffaa70');
@@ -130,7 +133,7 @@ if (anime) { // warm-white afternoon sun over a sky-blue fill, or a low orange s
   lighting.fill.color.set(day ? '#b5d4ff' : '#a7a0dc');
   lighting.fill.groundColor.set(day ? '#a8957f' : '#7a5c5c');
 }
-if (look === 'b') { // cool sky bounce from the side away from the sun, so façades facing different ways read apart
+if (look === 'b' && !(anime && toon === 'a')) { // cool sky bounce from the side away from the sun (not in the two-step cel)
   const bounce = new T.DirectionalLight('#8fa5d9', 0.8);
   bounce.position.set(0.55, 0.6, -0.6);
   scene.add(bounce);
@@ -170,12 +173,16 @@ if (look === 'a') {
 }
 // Look B post: HDR scene (no MSAA by default; the high pixel ratio keeps edges clean) -> quarter-res bloom
 // (windows, lamps) -> one full-screen pass: add glow, tone map, dusk LUT grade, sRGB to the screen.
-const composer = post ? new EffectComposer(renderer,
-  new T.WebGLRenderTarget(1, 1, { type: T.HalfFloatType, samples: msaa })) : undefined;
+const edges = anime && toon === 'a' ? new ToonEdges(camera) : undefined; // reads the scene depth, so the scene target keeps a depth texture
+const composer = post ? new EffectComposer(renderer, new T.WebGLRenderTarget(1, 1, { type: T.HalfFloatType, samples: msaa,
+  ...(edges ? { depthTexture: new T.DepthTexture(1, 1) } : {}) })) : undefined;
+// The composer clones the target, and clones share one GL texture (same Source): the edge pass would then write into
+// the buffer whose depth it samples. Only the scene buffer (renderTarget2, two swaps per frame) keeps the depth texture.
+if (composer && edges) composer.renderTarget1.depthTexture = null;
 const bloomPass = post && bloom ? new CheapBloom(0.25) : undefined, finalPass = post ? duskLUT(16, grade) : undefined;
 if (composer && finalPass) {
   renderer.toneMapping = T.NoToneMapping; // the LUT pass compresses HDR itself
-  [new RenderPass(scene, camera), bloomPass, finalPass].forEach(pass => pass && composer.addPass(pass));
+  [new RenderPass(scene, camera), bloomPass, edges, finalPass].forEach(pass => pass && composer.addPass(pass));
   finalPass.glow(bloomPass?.glow ?? null);
   if (anime) { finalPass.material.defines.NEUTRAL = ''; finalPass.uniforms.exposure.value = 1; }
 }
@@ -193,7 +200,7 @@ const debug = query.get('debug') === '1' ? debugOverlay(renderer, () => `q${reso
   + `shadow ${shadow} ${lighting.sun.shadow.mapSize.x}`) : undefined;
 function resize() {
   camera.aspect = innerWidth / innerHeight;
-  camera.fov = camera.aspect < 1 ? 70 : 50;
+  camera.fov = camera.aspect < 1 ? 54 : 38; // telephoto: less perspective distortion, buildings packed like an illustration
   camera.updateProjectionMatrix();
   resolution.resize(innerWidth, innerHeight);
 }
@@ -204,6 +211,7 @@ renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
   status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : controls.stickInput(), controls.state);
+  lighting.follow(character.group.position);
   character.update(status.speed, Math.min(dt, 0.1));
   const at = character.group.position; // only the two hero shops have a sim door; other façades stay closed
   ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
@@ -220,7 +228,7 @@ renderer.setAnimationLoop(now => {
   renderer.domElement.dataset.ready = 'true';
 });
 // Read-only diagnostics for browser verification and tests/play.
-Object.assign(window, { cornerDiagnostics: () => ({ look, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
+Object.assign(window, { cornerDiagnostics: () => ({ look, toon, style: anime ? 'anime' : 'current', day, ...renderer.info.render,
   sd: anime ? sd : 0, cast: cast.length, outfits: cast.map(person => person.group.name),
   memory: renderer.info.memory, dpr: renderer.getPixelRatio(), shadow, shadowSize: lighting.sun.shadow.mapSize.x,
   quality: resolution.level, passes: composer?.passes.filter(pass => pass.enabled).length ?? 0, camera: camera.position.toArray(),

@@ -1,7 +1,7 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { loadAssets } from '../render/assets';
-import { streetProps } from './props';
+import { streetProps, paint } from './props';
 
 // Bake static meshes into one mesh per material and 24 m cell: the city costs a few dozen draw calls
 // instead of hundreds, while cells out of view are still culled. Positions are baked in world space,
@@ -9,7 +9,7 @@ import { streetProps } from './props';
 function mergeStatic(scene: T.Scene) {
   scene.updateMatrixWorld(true);
   const buckets = new Map<string, { mesh: T.Mesh; parts: T.BufferGeometry[] }>(), center = new T.Vector3();
-  const sources: T.Mesh[] = [];
+  const sources: T.Mesh[] = [], v = new T.Vector3(), facet = new T.Vector3();
   scene.traverse(object => {
     if (!(object instanceof T.Mesh) || object instanceof T.InstancedMesh || Array.isArray(object.material)) return;
     const source: T.BufferGeometry = object.geometry, geometry = new T.BufferGeometry();
@@ -24,6 +24,15 @@ function mergeStatic(scene: T.Scene) {
     geometry.setAttribute('seed', new T.BufferAttribute(new Float32Array(count).fill(e[12] + 1.7 * e[14]), 1));
     geometry.computeBoundingBox();
     geometry.boundingBox!.getCenter(center);
+    if (/leaves/i.test(object.material.name)) { // leaf cards lit as one round canopy, not as hundreds of facets
+      const { position, normal } = geometry.attributes, pivot = center.clone();
+      pivot.y -= (geometry.boundingBox!.max.y - geometry.boundingBox!.min.y) * 0.25; // canopy normals lean upward
+      for (let i = 0; i < count; i++) {
+        facet.fromBufferAttribute(normal, i);
+        v.fromBufferAttribute(position, i).sub(pivot).normalize().lerp(facet, 0.3).normalize();
+        normal.setXYZ(i, v.x, v.y, v.z);
+      }
+    }
     const key = [object.material.uuid, object.castShadow, object.receiveShadow, !!source.index,
       Object.keys(source.attributes).sort(), Math.floor(center.x / 24), Math.floor(center.z / 24)].join();
     if (!buckets.has(key)) buckets.set(key, { mesh: object, parts: [] });
@@ -61,6 +70,44 @@ function contactShade(scene: T.Scene, boxes: T.Box3[]) {
     transparent: true, depthWrite: false, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 }));
   mesh.name = 'contact shade';
   scene.add(mesh);
+}
+
+// 빛씨: the Gyeol society's drifting motes of light over the street and trees. One unlit, unshadowed
+// T.Points draw call; each mote drifts and breathes on its own phase, driven by a time uniform.
+function lightSeeds(scene: T.Scene, count = 48) {
+  const position = new Float32Array(count * 3), phase = new Float32Array(count);
+  const random = (i: number, k: number) => Math.abs(Math.sin(i * 12.9898 + k * 78.233) * 43758.5453) % 1;
+  for (let i = 0; i < count; i++) {
+    position.set([-40 + 46 * random(i, 1), 0.6 + 3.4 * random(i, 2) ** 2, -40 + 46 * random(i, 3)], i * 3);
+    phase[i] = random(i, 4) * 6.28;
+  }
+  const geometry = new T.BufferGeometry();
+  geometry.setAttribute('position', new T.BufferAttribute(position, 3));
+  geometry.setAttribute('phase', new T.BufferAttribute(phase, 1));
+  const time = { value: 0 };
+  const material = new T.PointsMaterial({ size: 0.3, color: '#ffd9a0', transparent: true, opacity: 0.85,
+    blending: T.AdditiveBlending, depthWrite: false, map: paint(32, 32, g => {
+      const fade = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+      fade.addColorStop(0, '#fff'); fade.addColorStop(0.3, 'rgba(255,255,255,.6)'); fade.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = fade; g.fillRect(0, 0, 32, 32);
+    }) });
+  material.onBeforeCompile = shader => {
+    shader.uniforms.time = time;
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
+        uniform float time; attribute float phase; varying float vPulse;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        float t = time * 0.35 + phase;
+        transformed += vec3(sin(t), 0.5 * sin(t * 1.7 + 1.0), cos(t * 0.8)) * 0.45;
+        vPulse = 0.55 + 0.45 * sin(time * 1.3 + phase * 3.0);`)
+      .replace('gl_PointSize = size;', 'gl_PointSize = size * (0.7 + 0.5 * vPulse);');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vPulse;')
+      .replace('#include <opaque_fragment>', 'diffuseColor.a *= vPulse;\n#include <opaque_fragment>');
+  };
+  const points = new T.Points(geometry, material);
+  points.name = 'light seeds';
+  points.frustumCulled = false;
+  points.onBeforeRender = () => { time.value = performance.now() / 1000; };
+  scene.add(points);
 }
 
 export async function buildCorner(scene: T.Scene) {
@@ -116,7 +163,8 @@ export async function buildCorner(scene: T.Scene) {
   const types = ['Building_Small_1', 'Building_Medium_2_001', 'Building_Large_2'];
   const background = new T.Group();
   scene.add(background);
-  const tints = new Map<string, T.MeshStandardMaterial>(); // one tinted brick per building type, so merging can share it
+  // Background buildings share the asset's one brick material; looks.ts tints each from the per-mesh seed
+  // baked in mergeStatic, so merging is by cell only (one draw call per cell, not per tint).
   for (const [i, x, z, rotation] of [
     [0, -29, -11, 0], [1, -39, -11, 0], [2, -10, -34, Math.PI / 2],
     [0, -21, -27, 0], [1, -32, -27, 0], [2, -44, -28, 0],
@@ -124,21 +172,7 @@ export async function buildCorner(scene: T.Scene) {
     [2, 11, -41, -Math.PI / 2], [0, 22, -32, Math.PI],
     [1, -29, 11, Math.PI], [0, -40, 11, Math.PI],
     [2, -52, -11, 0], [0, -10, -47, Math.PI / 2],
-  ]) {
-    const tinted = building(place(city.scene, types[i], x, z, 9, rotation, 0.11), types[i]);
-    tinted.traverse(child => {
-      if (!(child instanceof T.Mesh)) return;
-      const vary = (material: T.Material) => {
-        if (!(material instanceof T.MeshStandardMaterial) || !/brick/i.test(material.name)) return material;
-        const key = material.uuid + i, tint = tints.get(key) ?? material.clone();
-        if (!tints.has(key)) tint.color.multiply(new T.Color(['#d2bbb0', '#b0b9c7', '#e4ceb2'][i]));
-        tints.set(key, tint);
-        return tint;
-      };
-      child.material = Array.isArray(child.material) ? child.material.map(vary) : vary(child.material);
-    });
-    background.add(tinted);
-  }
+  ]) background.add(building(place(city.scene, types[i], x, z, 9, rotation, 0.11), types[i]));
   for (const z of [-6.6, 6.6]) for (let i = 0; i < 7; i++)
     slab(0.65, 0.02, 2.5, -3.3 + i * 1.1, 0.008, z, paint, 'crosswalk');
   for (const x of [-6.6, 6.6]) for (let i = 0; i < 7; i++)
@@ -168,5 +202,6 @@ export async function buildCorner(scene: T.Scene) {
     }
   });
   mergeStatic(scene);
+  lightSeeds(scene);
   return { solids, walls, doors };
 }
