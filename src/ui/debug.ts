@@ -21,8 +21,7 @@ export function debugOverlay(renderer: WebGLRenderer, state: () => string) {
 // Only the screenshot tool opts in; override the follow camera immediately before rendering.
 if (new URLSearchParams(location.search).get('shot') === '1') {
   let pose: number[] | undefined;
-  const render = WebGLRenderer.prototype.render;
-  WebGLRenderer.prototype.render = function (scene, camera) {
+  const wrap = (render: WebGLRenderer['render']): WebGLRenderer['render'] => function (this: WebGLRenderer, scene, camera) {
     if (pose && camera instanceof PerspectiveCamera) {
       camera.position.set(pose[0], pose[1], pose[2]);
       camera.lookAt(pose[3], pose[4], pose[5]);
@@ -30,6 +29,17 @@ if (new URLSearchParams(location.search).get('shot') === '1') {
     }
     return render.call(this, scene, camera);
   };
+  const render = WebGLRenderer.prototype.render;
+  const wrapped = render && wrap(render);
+  Object.defineProperty(WebGLRenderer.prototype, 'render', {
+    configurable: true,
+    get() { return wrapped; },
+    set(render: WebGLRenderer['render']) {
+      Object.defineProperty(this, 'render', {
+        configurable: true, enumerable: true, writable: true, value: wrap(render),
+      });
+    },
+  });
   Object.assign(window, { __shot: {
     setCamera(pos?: number[], target?: number[]) {
       if (!pos && !target) { pose = undefined; return; }
