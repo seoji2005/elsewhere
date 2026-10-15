@@ -1,0 +1,10 @@
+{
+  "sky_day_top": "#8fcdef", "sky_day_mid": "#bfe2f0", "sky_day_low": "#dcdfd4", "sky_dusk_top": "#7a68b4", "sky_dusk_mid": "#f4a7a2", "sky_dusk_low": "#f4c8a8", "sky_night_top": "#121d38", "sky_night_mid": "#2a3150", "sky_night_low": "#3c415c",
+  "sun_day": "#fff0d9", "sun_dusk": "#ffaa70", "moon": "#8c94d0", "fill_day_top": "#b5d4ff", "fill_day_low": "#a8957f", "fill_dusk_top": "#a7a0dc", "fill_dusk_low": "#7a5c5c", "fill_night_top": "#4a4f86", "fill_night_low": "#3a2e3c", "ink_day": "#2a1c1c", "ink_dusk": "#2a1a26", "ink_night": "#1a1426",
+  "brick_red": "#9a5c4c", "brownstone": "#7c5446", "limestone": "#cdbb9e", "concrete": "#9a968a", "steel_blue": "#6c7e90", "trim_cream": "#e2d6bf", "trim_green": "#3f4a44",
+  "road": "#8e8a86", "sidewalk": "#b3a596", "curb": "#c9c0b0", "crosswalk": "#e8e2d6", "road_yellow": "#d9a83a",
+  "sign_green": "#2f4a3e", "sign_wine": "#6e2f36", "sign_navy": "#2c3550", "letter_cream": "#f1e2c2", "awning_terra": "#a8503f", "awning_green": "#3f6b52", "awning_navy": "#34406a", "taxi": "#f0b432", "hydrant": "#c8a43a", "subway": "#3d7254",
+  "window_warm": "#ffd29a", "window_cool": "#cfe4ff", "streetlamp": "#ffc786", "bulb": "#ffe0a0", "neon_cyan": "#5fe6f0", "neon_magenta": "#ff5aa8", "neon_red": "#ff5040", "neon_lime": "#c8f060",
+  "oatmeal": "#d8cbb8", "lavender_gray": "#b9aec4", "charcoal": "#3e3a44", "navy": "#34405a", "denim": "#55688a", "khaki": "#8f8268", "olive": "#6c7254", "wine": "#7a3a44", "shirt_white": "#ecebe4", "mustard": "#d0a040", "coral": "#d9705a", "teal": "#3f8f8a",
+  "leaf": "#7d9a52", "trunk": "#5a4636"
+}
