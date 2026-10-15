@@ -35,6 +35,8 @@ export interface TycoonSystem<S> {
   create(ctx: TycoonCtx): S;
   /** Returns a checked state from a save; throws when it is invalid. */
   validate(raw: unknown, ctx: TycoonCtx): S;
+  /** Before this minute's visitors are processed (after deliveries and wages): transitions that must precede customers. */
+  beforeMinute?(ctx: TycoonCtx, s: S, minute: number): void;
   /** After the session's own processing for this minute. */
   onMinute?(ctx: TycoonCtx, s: S, minute: number): void;
   /** Once per day, after the day's close at 23:59 (shops settled, market advanced). */

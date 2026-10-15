@@ -27,6 +27,11 @@ export function runMinute(t: TycoonState, systems: Systems, ctx: CtxFor, minute:
   for (const system of systems) system.onMinute?.(c ??= ctx(t), t.systems[system.id], minute);
 }
 
+export function runBeforeMinute(t: TycoonState, systems: Systems, ctx: CtxFor, minute: number): void {
+  let c: TycoonCtx | undefined;
+  for (const system of systems) system.beforeMinute?.(c ??= ctx(t), t.systems[system.id], minute);
+}
+
 export function runDay(t: TycoonState, systems: Systems, ctx: CtxFor, day: number): void {
   let c: TycoonCtx | undefined;
   for (const system of systems) system.onDay?.(c ??= ctx(t), t.systems[system.id], day);

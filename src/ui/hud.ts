@@ -21,9 +21,14 @@ import { answerHaggle, type PatronState } from '../game/tycoon/patrons';
 import { shows } from '../data/shows';
 import { npcs } from '../data/npcs';
 import { leisure } from '../game/tycoon/leisure';
+import { currentEvent, readNotice, respond } from '../game/tycoon/cityEvents';
+import type { CityState } from '../sim/cityEvents';
+import { cityLines, partnerLot, roadworks } from '../data/cityEvents';
+import { parkingSpaces } from '../game/tycoon/patrons';
+import { workKey, workTab, worryUi } from './work';
 
 type Session = ReturnType<typeof createSession>;
-const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
+const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게', biz: '업무' } as const;
 type Tab = keyof typeof tabs;
 const placeName = (id: string) => places.find(p => p.id === id)?.name ?? (id === 'street' ? '거리' : id);
 const two = (n: number) => String(n).padStart(2, '0');
@@ -341,7 +346,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   }
   // C095: inside the player's own shop, customers' lines pop up as bubbles (2s each, queued) and hagglers wait for an answer.
   const patronBox = make('patrons'), bubble = make('bark', patronBox), haggleBox = make('haggle', patronBox);
-  bubble.hidden = haggleBox.hidden = true;
+  const worryBox = make('haggle', patronBox); // C102: a regular's worry after buying → 업무 탭 제안
+  bubble.hidden = haggleBox.hidden = worryBox.hidden = true;
   let heard = state.world.clock.totalMinutes, asked = '';
   const lines: string[] = [];
   const nextBark = () => {
@@ -352,6 +358,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     const p = session.tycoon.state().systems.patrons as PatronState | undefined, lease = state.leases.find(l => !l.ended);
     const shop = state.book.businesses.find(b => b.id === lease?.businessId && b.closedAt === null);
     const inside = !!p && shop?.placeId === state.player.placeId;
+    worryUi(session, worryBox, residents, inside, act, id => { selected = id; show('biz'); });
     for (const l of p?.feed ?? []) if (l.minute > heard && inside) lines.push(`${l.name}: “${l.text}”`);
     heard = Math.max(heard, ...(p?.feed ?? []).map(l => l.minute));
     if (bubble.hidden && lines.length) nextBark();
@@ -366,9 +373,36 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔지 못했어요' : `${name} 님이 그냥 갔어요`; };
     button(make('haggle-btns', haggleBox), '깎아 주기', reply(true)); button(haggleBox.lastElementChild as HTMLElement, '안 돼요', reply(false));
   }
+  // C100: one card per roadworks stage — when, what it does to parking, one person's line and up to three answers (GDD 원칙 6).
+  const cityBox = make('haggle', patronBox);
+  let cityShown = '';
+  function cityUi() {
+    const c = session.tycoon.state().systems.cityEvents as CityState | undefined, e = c && currentEvent(c);
+    const minute = Math.floor(state.world.clock.totalMinutes), key = e ? JSON.stringify([e.id, e.stage, e.seen, e.impact]) : '';
+    cityBox.hidden = !e;
+    if (!e || key === cityShown) return;
+    cityShown = key; cityBox.replaceChildren();
+    const shop = state.book.businesses.find(b => b.ownerId === 'player' && b.closedAt === null);
+    const answer = (kind: 'breakfast' | 'parking' | 'none', itemId?: string) => () => session.tycoon.command('cityEvents',
+      (ctx, s: CityState) => respond(ctx, s, kind, itemId)) ? { breakfast: '아침 메뉴를 내걸었어요', parking: '주차장과 제휴했어요', none: '그대로 영업해요' }[kind] : '지금은 할 수 없어요';
+    if (e.stage === 'ended') {
+      make('', cityBox, 'div', `${cityLines.reopened} 앞 주차 ${parkingSpaces}칸`);
+      button(make('haggle-btns', cityBox), '확인', () => { session.tycoon.command('cityEvents', readNotice); });
+      return;
+    }
+    const days = Math.ceil((e.startAt - minute) / 1440), worker = residents.find(n => n.id === e.workers[0])?.name ?? '인부';
+    make('', cityBox, 'div', e.stage === 'announced'
+      ? `${['오늘', '내일', '모레'][days] ?? `${days}일 뒤`} 07:00부터 ${roadworks.days}일 · 앞 주차 ${parkingSpaces}→0칸 · 도보 출입 가능\n${worker}: “${cityLines.rumor}”`
+      : `앞길 공사 중 · ${Math.ceil((e.endAt - minute) / 1440)}일 남음\n차 손님 못 옴 ${e.impact.carFails} · 인부 구매 ${e.impact.workerBuys}`);
+    make('', make('', cityBox, 'details'), 'summary', '왜 공사하나요').after(cityLines.why);
+    const btns = make('haggle-btns', cityBox), food = shop?.store.stock.find(st => items.find(i => i.id === st.itemId)?.category === 'food');
+    if (food) button(btns, '아침 메뉴', answer('breakfast', food.itemId));
+    if (!e.responses.some(r => r.kind === 'parking')) button(btns, `주차 제휴 ${partnerLot.perDay * Math.ceil((e.endAt - Math.max(minute, e.startAt)) / 1440)}결`, answer('parking'));
+    button(btns, '그대로 영업', answer('none'));
+  }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
-    patronsUi();
+    patronsUi(); cityUi();
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
@@ -392,6 +426,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
           fun.today().map(t => [t.status, t.sceneId])]
         : tab === 'chat' ? [contacts().map(n => n.id), state.messenger.messages.filter(m => m.delivered).length]
         : tab === 'shop' ? shopKey(state)
+        : tab === 'biz' ? workKey(session)
         : [companies.map(c => c.id), Object.keys(state.market.holdings.player ?? {})
           .filter(id => state.market.holdings.player[id] > 0).sort()];
     const key = JSON.stringify([tab, state.player.placeId, selected, membership]);
@@ -407,7 +442,8 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     Array.from(tabBar.children).forEach((element, index) => element.classList.toggle('on', Object.keys(tabs)[index] === tab));
     body.classList.toggle('shop', tab === 'shop');
     ({ people, work: chores, stock: stocks, chat, shop: () => shopTab(session, { body, residents, make, button, row, title, note, live,
-      contacts, stage, placeName, hiring: selected === 'hire', hire: on => { selected = on ? 'hire' : ''; } }) })[tab]();
+      contacts, stage, placeName, hiring: selected === 'hire', hire: on => { selected = on ? 'hire' : ''; } }),
+      biz: () => workTab(session, { body, residents, make, button, row, title, note, act, selected, select: id => { selected = id; } }) })[tab]();
     body.scrollTop = tab === 'chat' && selected ? body.scrollHeight : scroll;
   }
   render();

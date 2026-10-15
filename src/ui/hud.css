@@ -151,3 +151,6 @@ body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit
   background: rgba(20, 24, 32, 0.9); color: #fff; font: 600 15px system-ui, sans-serif; white-space: nowrap;
 }
 .hud-ask[hidden] { display: none; }
+/* C102 업무 탭: 한국어 문장은 단어 단위로 줄바꿈, 펼침 제목은 손가락 크기. */
+.hud-say { word-break: keep-all; }
+.hud-body details summary { min-height: 32px; line-height: 32px; }
