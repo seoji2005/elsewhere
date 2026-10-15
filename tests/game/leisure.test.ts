@@ -63,3 +63,30 @@ it('C105: tickets and choices survive save and restore', () => {
   expect((next.tycoon.state().systems.leisure as LeisureState).tickets[0]).toMatchObject({ status: 'attended', sceneId: 'comedy-crowd' });
   expect(() => leisure(next).choose('comedy-work')).toThrow('Already chosen');
 });
+
+it('C113: ticket → due 10 minutes before → enter the venue → scene pick → memory', () => {
+  const { state, until, show } = setup();
+  show.buyTicket('jazz', 'aro');
+  until(19 * 60 - 11); expect(show.due()).toBeUndefined();
+  until(19 * 60 - 10); expect(show.due()).toMatchObject({ show: { id: 'jazz' }, ticket: { status: 'booked' } });
+  state.player.placeId = 'cafe'; // 입장 (hud go)
+  until(19 * 60 + 1); expect(show.due()?.ticket.status).toBe('attended');
+  expect(show.choose('jazz-swing').name).toBe('빠른 스윙');
+  expect(show.due()).toBeUndefined();
+  expect(state.dialogue.memories.aro.entries.some(m => m.sourceEventId === 'leisure:jazz:1')).toBe(true);
+});
+
+it('C113: at the venue while a skip runs through the show still ends in a memory, not nothing', () => {
+  const { session, state, show, energy } = setup();
+  show.buyTicket('comedy', 'aro'); state.player.placeId = 'shop';
+  session.skipTo(1440 + 9 * 60); // QA: stood in the shop, the show passed with nothing to pick
+  const ticket = (session.tycoon.state().systems.leisure as LeisureState).tickets[0];
+  expect(ticket).toMatchObject({ status: 'attended', sceneId: null });
+  const before = energy(); show.sync();
+  expect(ticket.sceneId).toBe('comedy-work');
+  expect(energy()).toBe(Math.min(100, before + 15));
+  expect(state.dialogue.memories.aro.entries.filter(m => m.sourceEventId === 'leisure:comedy:1')).toHaveLength(1);
+  show.sync(); expect(energy()).toBe(Math.min(100, before + 15));
+  session.skipTo(2 * 1440 + 9 * 60);
+  expect(show.recall('aro')).toContain('출근길');
+});
