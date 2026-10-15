@@ -21,6 +21,10 @@ import { answerHaggle, type PatronState } from '../game/tycoon/patrons';
 import { shows } from '../data/shows';
 import { npcs } from '../data/npcs';
 import { leisure } from '../game/tycoon/leisure';
+import { currentEvent, readNotice, respond } from '../game/tycoon/cityEvents';
+import type { CityState } from '../sim/cityEvents';
+import { cityLines, partnerLot, roadworks } from '../data/cityEvents';
+import { parkingSpaces } from '../game/tycoon/patrons';
 
 type Session = ReturnType<typeof createSession>;
 const tabs = { people: '주민·만남', work: '일·소비', stock: '결증·장소', chat: '메신저', shop: '내 가게' } as const;
@@ -366,9 +370,36 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       answerHaggle(c, s, h.visitId, accept)) && accept ? `${h.offer}결에 팔았어요` : accept ? '팔지 못했어요' : `${name} 님이 그냥 갔어요`; };
     button(make('haggle-btns', haggleBox), '깎아 주기', reply(true)); button(haggleBox.lastElementChild as HTMLElement, '안 돼요', reply(false));
   }
+  // C100: one card per roadworks stage — when, what it does to parking, one person's line and up to three answers (GDD 원칙 6).
+  const cityBox = make('haggle', patronBox);
+  let cityShown = '';
+  function cityUi() {
+    const c = session.tycoon.state().systems.cityEvents as CityState | undefined, e = c && currentEvent(c);
+    const minute = Math.floor(state.world.clock.totalMinutes), key = e ? JSON.stringify([e.id, e.stage, e.seen, e.impact]) : '';
+    cityBox.hidden = !e;
+    if (!e || key === cityShown) return;
+    cityShown = key; cityBox.replaceChildren();
+    const shop = state.book.businesses.find(b => b.ownerId === 'player' && b.closedAt === null);
+    const answer = (kind: 'breakfast' | 'parking' | 'none', itemId?: string) => () => session.tycoon.command('cityEvents',
+      (ctx, s: CityState) => respond(ctx, s, kind, itemId)) ? { breakfast: '아침 메뉴를 내걸었어요', parking: '주차장과 제휴했어요', none: '그대로 영업해요' }[kind] : '지금은 할 수 없어요';
+    if (e.stage === 'ended') {
+      make('', cityBox, 'div', `${cityLines.reopened} 앞 주차 ${parkingSpaces}칸`);
+      button(make('haggle-btns', cityBox), '확인', () => { session.tycoon.command('cityEvents', readNotice); });
+      return;
+    }
+    const days = Math.ceil((e.startAt - minute) / 1440), worker = residents.find(n => n.id === e.workers[0])?.name ?? '인부';
+    make('', cityBox, 'div', e.stage === 'announced'
+      ? `${['오늘', '내일', '모레'][days] ?? `${days}일 뒤`} 07:00부터 ${roadworks.days}일 · 앞 주차 ${parkingSpaces}→0칸 · 도보 출입 가능\n${worker}: “${cityLines.rumor}”`
+      : `앞길 공사 중 · ${Math.ceil((e.endAt - minute) / 1440)}일 남음\n차 손님 못 옴 ${e.impact.carFails} · 인부 구매 ${e.impact.workerBuys}`);
+    make('', make('', cityBox, 'details'), 'summary', '왜 공사하나요').after(cityLines.why);
+    const btns = make('haggle-btns', cityBox), food = shop?.store.stock.find(st => items.find(i => i.id === st.itemId)?.category === 'food');
+    if (food) button(btns, '아침 메뉴', answer('breakfast', food.itemId));
+    if (!e.responses.some(r => r.kind === 'parking')) button(btns, `주차 제휴 ${partnerLot.perDay * Math.ceil((e.endAt - Math.max(minute, e.startAt)) / 1440)}결`, answer('parking'));
+    button(btns, '그대로 영업', answer('none'));
+  }
   // Numbers update in place; only actions and changes to the visible list rebuild the panel.
   function render(force = false) {
-    patronsUi();
+    patronsUi(); cityUi();
     const cash = state.world.ledger.balances.player ?? 0, energy = state.shop.residents.player?.energy ?? 50;
     timeText.textContent = clock(now());
     placeText.textContent = placeName(state.player.placeId);
