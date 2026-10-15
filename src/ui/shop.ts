@@ -13,6 +13,9 @@ import { personas } from '../data/personas';
 import { carried, dropAtShop, pickupOrder, pickupProblem, type HaulState } from '../game/tycoon/haul';
 import { canNegotiate, currentDraft, findingsOf, negotiate, requestReview, reviewFee, risks, type CounselState, type Draft } from '../game/tycoon/counsel';
 import { reviewDays } from '../sim/advisors';
+import { adChannels, adMessages, adModels, segmentNames, segments } from '../data/ads';
+import { planCampaign, type CampaignInput } from '../sim/ads';
+import { buyCampaign, running, type AdState } from '../game/tycoon/ads';
 
 type Session = ReturnType<typeof createSession>;
 type State = Session['state'];
@@ -40,6 +43,14 @@ const haulOf = (state: State) => state.tycoon.systems.haul as HaulState;
 const staff = (state: State, businessId: string) => state.book.employment.filter(e => e.businessId === businessId && e.leftAt === null);
 let wage = 5, reply = '', replyTo = '', reading = ''; // storefront whose contract is open
 const counselOf = (state: State) => state.tycoon.systems.counsel as CounselState | undefined;
+const adsOf = (state: State) => state.tycoon.systems.ads as AdState | undefined;
+// C098 ad picker: one decision per screen (channel → target → message → model → weeks → preview).
+let adStep = -1, adMore = false, adDraft: Partial<CampaignInput> = {};
+const reachNames = { neighborhood: '동네', city: '도시 전체', national: '전국' } as const;
+const promiseNotes: Record<string, string> = { price: '값이 싸야 약속을 지켜요', speed: '줄이 짧아야 약속을 지켜요',
+  quality: '품절이 적어야 약속을 지켜요', emotion: '지킬 약속이 없어요', buzz: '눈길은 끌지만 과열될 수 있어요' };
+const pct = (p: number) => `${Math.round(p * 100)}%`;
+const nameIn = (list: readonly { id: string; name: string }[], id?: string) => list.find(x => x.id === id)?.name ?? '';
 
 // Status-bar extras: today's weather glyph and the latest lease's arrears warning.
 export function shopStatus(state: State) {
@@ -52,7 +63,8 @@ export function shopKey(state: State) {
   const b = playerShop(state);
   return [state.leases.map(l => [l.id, l.ended, l.businessId, l.orders.filter(o => !o.delivered).length, l.reports.length]), haulOf(state).load,
     b ? staff(state, b.id).map(e => e.actorId) : [], reading,
-    counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages];
+    counselOf(state)?.drafts.map(d => [d.id, d.removed, d.reviews.map(r => r.done)]), counselOf(state)?.messages,
+    adsOf(state)?.campaigns.map(c => [c.id, c.revealed, c.broken])];
 }
 // Relationship-aware answers: friends speak casually, everyone else politely.
 const lines: Record<string, [string, string]> = {
@@ -95,6 +107,7 @@ export function shopTab(session: Session, ui: ShopUi) {
     return;
   }
   if (ui.hiring) return hireView(b.id);
+  if (adStep >= 0) return adView();
   const kind = (Object.keys(shopKinds) as ShopKind[]).find(k => (shopKinds[k] as readonly string[]).includes(b.store.stock[0]?.itemId));
   const day = () => gameTime(state.world.clock).day, today = () => dailySummary(b.store, day());
   title(`${kind ? kindNames[kind] : '가게'} · ${ui.placeName(b.placeId)} · 오늘`);
@@ -110,6 +123,16 @@ export function shopTab(session: Session, ui: ShopUi) {
   live(make('shop-barks', body), () => ((session.tycoon.state().systems.patrons as PatronState | undefined)?.feed ?? [])
     .filter(l => Math.floor(l.minute / 1440) === Math.floor(state.world.clock.totalMinutes / 1440)).slice(-5)
     .map(l => `${hhmm(l.minute % 1440)} ${l.name}(${personas[l.personaId].name}) “${l.text}”`).join('\n') || '아직 손님 말이 없어요.');
+  const adState = adsOf(state);
+  if (adState) {
+    title(`광고 · 광고 평판 ${signed(adState.reputation)}`);
+    for (const c of adState.campaigns.slice(-3)) row(`${nameIn(adChannels, c.channelId)} · ${c.targets.map(t => segmentNames[t]).join('·')}`, () => {
+      const left = c.startDay + c.result.curve.indexOf(0, adChannels.find(ch => ch.id === c.channelId)!.leadDays) - day();
+      return `${!c.revealed ? '준비 중' : c.result.summary}${c.broken ? `\n⚠ ${c.broken}` : ''}`
+        + `\n${running(c, day()) ? `여운 포함 ${left}일 남음 · ` : '끝남 · '}광고 보고 왔다는 손님 ${c.seen}명`;
+    });
+    button(make('hud-chips', body), '광고 내기', () => { adStep = 0; adMore = false; adDraft = {}; });
+  }
   const load = carried(haulOf(state));
   if (load) button(row(`들고 있는 상자 📦×${load}`, state.player.placeId === b.placeId ? '가게 안이에요' : `${ui.placeName(b.placeId)} 가게로 가져가세요 · 걸음이 느려요`),
     '뒷방에 내려놓기', () => `상자 ${session.tycoon.command('haul', (ctx, h: HaulState) => dropAtShop(ctx, h))}개를 뒷방에 넣었어요`,
@@ -180,6 +203,42 @@ export function shopTab(session: Session, ui: ShopUi) {
     else live(make('hud-sub', chips, 'span'), () => review.done ? `${name} 검토 끝 · 짚은 조항 ${review.findings.length}개`
       : `${name} 검토 중 · ${Math.max(1, review.readyDay - gameTime(state.world.clock).day)}일 뒤 결과`);
     button(chips, '서명', () => { session.rentStore(u.id, d.id); return `${ui.placeName(u.placeId)} 점포를 계약했어요 (-${u.deposit}결)`; });
+  }
+  function adView() {
+    const head = make('hud-head', body);
+    button(head, adStep ? '‹ 이전' : '‹ 가게', () => { adStep--; });
+    make('hud-name', head, 'div', adStep < 5 ? `광고 내기 ${adStep + 1}/5` : '광고 미리보기');
+    const pickOne = (question: string, options: [string, string, () => void][]) => {
+      title(question);
+      for (const [label, sub, choose] of options) button(row(label, sub), '고르기', () => { choose(); adStep++; });
+    };
+    const target = (adDraft.targets ?? [])[0];
+    if (adStep === 0) pickOne('어디에 낼까요?', adChannels.map(ch => [ch.name, `${reachNames[ch.reach]}에 닿아요${ch.leadDays ? ` · ${ch.leadDays}일 뒤 시작` : ' · 바로 시작'}`,
+      () => { adDraft.channelId = ch.id; }]));
+    if (adStep === 1) pickOne('누구에게 보일까요?', segments.map(g => [segmentNames[g],
+      `${nameIn(adChannels, adDraft.channelId)}${adChannels.find(ch => ch.id === adDraft.channelId)!.fit[g] >= 0.8 ? '에 잘 닿는 손님' : '은 덜 닿아요'}`,
+      () => { adDraft.targets = [g]; }]));
+    if (adStep === 2) pickOne(`${segmentNames[target!]}에게 무엇을 말할까요?`, adMessages.map(m => [m.name, promiseNotes[m.id], () => { adDraft.messageId = m.id; }]));
+    if (adStep === 3) pickOne('누가 광고에 나올까요?', adModels.map(m => [m.name, m.id === 'none' ? '가게만 보여 줘요'
+      : m.scandal ? '눈길을 더 끌지만 구설 위험이 있어요' : '눈길을 더 끌어요', () => { adDraft.modelId = m.id; }]));
+    if (adStep === 4) pickOne('얼마 동안 낼까요?', [1, 2, 4].map(w => [`${w}주`, w === 4 ? '오래 보일수록 손님이 익숙해져요' : '짧게 시험해 봐요',
+      () => { adDraft.weeks = w; }]));
+    if (adStep < 5) return;
+    const input = adDraft as CampaignInput, plan = planCampaign(input);
+    title(`${nameIn(adChannels, input.channelId)} · ${segmentNames[target!]} · ${nameIn(adMessages, input.messageId)} · ${input.weeks}주`);
+    const stats = make('shop-stats', body);
+    for (const [label, text] of [['비용', `${plan.cost}결`], ['대박', pct(plan.hitChance)], ['역풍', pct(plan.backlashChance)]])
+      make('', make('', stats, 'div', label), 'b', text);
+    note(`운은 사는 순간 정해져요. 결과는 손님 말로 먼저 와요.`);
+    const chips = make('hud-chips', body);
+    button(chips, adMore ? '접기' : '자세히', () => { adMore = !adMore; });
+    if (adMore) note(`무반응 ${pct(plan.dudChance)} · 손님이 들를 마음 +${pct(plan.minLift)}~${pct(plan.maxLift)} (보통 +${pct(plan.expectedLift)})`);
+    button(chips, '광고 사기', () => {
+      const c = session.tycoon.command('ads', (ctx, s: AdState) => buyCampaign(ctx, s, input));
+      if (typeof c === 'string') throw Error(c);
+      adStep = -1;
+      return `${nameIn(adChannels, c.channelId)} 광고를 샀어요 (-${c.cost}결)`;
+    });
   }
   function hireView(businessId: string) {
     const head = make('hud-head', body);
