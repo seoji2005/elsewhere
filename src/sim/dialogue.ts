@@ -2,6 +2,8 @@ import { companies } from '../data/companies';
 import { revealMarketHint, type MarketState } from './market';
 import { dialogueFor, sharedMemoryTemplates, conflictTemplates, marketHintLines } from '../data/dialogue';
 import type { Npc } from '../data/npcs';
+import { archetypes } from '../data/archetypes';
+import type { GeneratedNpc } from './npcgen';
 import type { GameTime } from './clock';
 import { createMemoryState, minuteOf, recall, remember, memoryLine, type MemoryState } from './memory';
 import { interact, relationshipStage, type DialogueChoice, type RelationshipState,
@@ -21,8 +23,11 @@ export interface DialogueContext {
 }
 function informalFor(ctx: DialogueContext): boolean | undefined {
   const scene = ctx.scene;
+  const npc = ctx.npc as Partial<GeneratedNpc>;
+  const speech = npc.speech ?? (archetypes.find(a => a.id === npc.archetypeId)
+    ?? archetypes.find(a => a.traits.every((trait, i) => trait === ctx.npc.traits[i])) ?? archetypes[0]).speech;
   return scene ? !scene.atWork && scene.peopleCount === 2
-    && (scene.bond ? friendly(scene.bond) : ctx.value >= 30) : undefined;
+    && (scene.bond ? friendly(scene.bond) : ctx.value >= speech.informalAt) : undefined;
 }
 export function conflictLine(ctx: DialogueContext): string | undefined {
   const hurt = ctx.scene?.bond?.hurt;
@@ -43,7 +48,7 @@ export function buildDialogue(state: DialogueState, ctx: DialogueContext) {
   validate(ctx);
   const template = dialogueFor(ctx.npc, ctx.scene?.bond?.affection ?? ctx.value, ctx.actorId, informalFor(ctx));
   const pending = ctx.scene?.bond?.hurt?.resolved === false;
-  const memories = pending || informalFor(ctx) === false ? undefined : state.memories[ctx.npc.id];
+  const memories = pending ? undefined : state.memories[ctx.npc.id];
   const now = minuteOf(ctx.time);
   const shared = memories ? recall({ ...memories, entries: memories.entries.filter(memory =>
     (memory.kind === 'meal' || memory.kind === 'shared-work') && memory.mentionedAt === undefined
