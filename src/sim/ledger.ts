@@ -10,7 +10,8 @@ export interface Transaction {
 }
 export interface LedgerState {
   balances: Record<string, number>; transactions: Transaction[];
-  history?: { retired?: Record<string, Record<string, string[]>>; ids: string[]; days: Record<string, Record<string, [number, number, number?, number?]>> };
+  history?: { retired?: Record<string, Record<string, string[]>>; ids: string[]; days: Record<string, Record<string, [number, number, number?, number?]>>;
+    through?: number }; // C108: every dated ID (below) of this day or earlier counts as recorded
 }
 export type TransferResult = { ok: true; duplicate: boolean } | { ok: false; error: string };
 const owns = (object: object, key: string) => Object.hasOwn(object, key);
@@ -51,10 +52,23 @@ export function findTransaction(ledger: LedgerState, id: string): Transaction | 
   return index.ids.get(id);
 }
 
+// C108: IDs that carry their own day and are only ever tried on that day (a visit's sale and supply, daily supply,
+// the production bonus). Once their day is over 30 days old they are closed whether or not they were recorded.
+const dated = [/^store-sale:\["[^"]*","(?:shop:lease:\d+|[\w-]+):(\d+):/, /^supply:[\w-]+:(\d+):/,
+  /^daily-supply:[\w-]+:[\w-]+:(\d+):/, /^production:(\d+):/];
+export function datedDay(id: string): number | null {
+  for (const pattern of dated) { const match = pattern.exec(id); if (match) return Number(match[1]); }
+  return null;
+}
+const closed = (ledger: LedgerState, id: string) => {
+  const through = ledger.history?.through, day = through === undefined ? null : datedDay(id);
+  return day !== null && day <= through!;
+};
+
 // True when transfer would report this ID as a duplicate.
 export function isRecorded(ledger: LedgerState, id: string): boolean {
   const cut = id.lastIndexOf(':') + 1, prefix = id.slice(0, cut), suffix = id.slice(cut);
-  return !!(ledger.history?.ids.includes(id) ||
+  return !!(ledger.history?.ids.includes(id) || closed(ledger, id) ||
       (ledger.history?.retired !== undefined && retiredSuffixes(ledger.history.retired).get(prefix)?.has(suffix)) ||
       findTransaction(ledger, id));
 }
@@ -77,10 +91,13 @@ export function transfer(ledger: LedgerState, transaction: Transaction): Transfe
 }
 
 // Group exact IDs by original day and shared prefix; retry dates do not affect lookup.
+// C108: past 30 days (beforeDay is 14 days back), dated IDs become one 'through' mark and daily totals merge into weeks.
 export function compactLedger(ledger: LedgerState, beforeDay: number): void {
-  const history = ledger.history ??= { ids: [], days: {} };
+  const history = ledger.history ??= { ids: [], days: {} }, old = beforeDay - 17;
+  if (old > (history.through ?? 0)) history.through = old;
   const retire = (id: string, day: number) => {
     if (id.startsWith('initial:')) { if (!history.ids.includes(id)) history.ids.push(id); return; }
+    if (closed(ledger, id)) return;
     const cut = id.lastIndexOf(':') + 1, group = (history.retired ??= {})[day] ??= {};
     const suffixes = group[id.slice(0, cut)] ??= [];
     if (!suffixes.includes(id.slice(cut))) suffixes.push(id.slice(cut));
@@ -102,5 +119,22 @@ export function compactLedger(ledger: LedgerState, beforeDay: number): void {
     }
     return false;
   });
+  for (const [day, group] of Object.entries(history.retired ?? {})) { // older saves listed dated IDs one by one
+    for (const [prefix, suffixes] of Object.entries(group)) {
+      const open = suffixes.filter(suffix => !closed(ledger, prefix + suffix));
+      if (open.length) group[prefix] = open; else delete group[prefix];
+    }
+    if (!Object.keys(group).length) delete history.retired![day];
+  }
+  for (const [key, accounts] of Object.entries(history.days)) {
+    const day = Number(key), week = day - (day - 1) % 7; // days 1-7 → 1, 8-14 → 8, ...
+    if (day > old || week === day) continue;
+    const into = history.days[week] ??= {};
+    for (const [id, totals] of Object.entries(accounts)) {
+      const sum = into[id] ??= [0, 0];
+      totals.forEach((n, i) => { sum[i] = (sum[i] ?? 0) + (n ?? 0); });
+    }
+    delete history.days[key];
+  }
   if (history.retired) retiredIndex.delete(history.retired);
 }

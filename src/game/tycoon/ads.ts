@@ -11,7 +11,8 @@ export interface Campaign extends CampaignInput {
   id: string; cost: number; startDay: number; result: CampaignResult;
   revealed: boolean; broken: string; seen: number; // broken: the promise complaint, once
 }
-export interface AdState { campaigns: Campaign[]; reputation: number; lastSeen: Record<string, number> }
+// ended (C108): campaigns over a week past their curve, kept as one summary line.
+export interface AdState { campaigns: Campaign[]; reputation: number; lastSeen: Record<string, number>; ended?: { count: number; cost: number; seen: number } }
 export const MEDIA_JOB = '밤결 기록사', SEEN_CHANCE = 0.4;
 const bySegment: Partial<Record<PersonaId, Segment>> = { students: 'students', rusher: 'workers', elder: 'elders', bigSpender: 'affluent' };
 
@@ -61,6 +62,16 @@ export function serviceStats(ctx: TycoonCtx, day: number) {
     priceLevel: prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 1 };
 }
 
+/** C108: a campaign whose curve ended over 7 days ago adds nothing more; fold it into the summary. */
+export function pruneAds(s: AdState, day: number) {
+  s.campaigns = s.campaigns.filter(c => {
+    if (!c.revealed || day < c.startDay + c.result.curve.length + 7) return true;
+    const e = s.ended ??= { count: 0, cost: 0, seen: 0 };
+    e.count++; e.cost += c.cost; e.seen += c.seen;
+    return false;
+  });
+}
+
 export const ads: TycoonSystem<AdState> = {
   id: 'ads',
   create: () => ({ campaigns: [], reputation: 0, lastSeen: {} }),
@@ -69,7 +80,8 @@ export const ads: TycoonSystem<AdState> = {
     if (!s || typeof s !== 'object' || !Array.isArray(s.campaigns) || !Number.isFinite(s.reputation) || Math.abs(s.reputation) > 100 ||
         !Object.values(s.lastSeen ?? 0).every(natural) || !s.campaigns.every(c => typeof c?.id === 'string' &&
           natural(c.cost) && natural(c.startDay) && natural(c.seen) && typeof c.broken === 'string' &&
-          Array.isArray(c.result?.curve) && segments.every(g => Number.isFinite(c.result.peak?.[g]))))
+          Array.isArray(c.result?.curve) && segments.every(g => Number.isFinite(c.result.peak?.[g]))) ||
+        s.ended !== undefined && !(natural(s.ended?.count) && natural(s.ended.cost) && natural(s.ended.seen)))
       throw Error('Invalid ads');
     for (const c of s.campaigns) planCampaign(c); // unknown channel, message or model
     return s;
@@ -95,5 +107,6 @@ export const ads: TycoonSystem<AdState> = {
       if (check.broken) { c.broken = check.summary; adjust(s, check.reputation); }
     }
     for (const [id, d] of Object.entries(s.lastSeen)) if (d < day) delete s.lastSeen[id];
+    pruneAds(s, day);
   },
 };
