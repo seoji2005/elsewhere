@@ -5,3 +5,4 @@ dist-single
 test-results
 .vite-cache
 .shots-gha
+.shots-c096

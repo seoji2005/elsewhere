@@ -218,7 +218,7 @@ it('round trips v4 memories, dating, bond receipts/budgets and ripple notices wi
     hops: 0, mode: 'witness', kind: 'help', actorId: 'player', targetId: 'lise', topic: '차' });
   session.tick(1440); const ctx = { actorId: 'player', npc, time: gameTime(state.world.clock), value: 30 };
   const recalled = buildDialogue(state.dialogue, ctx).line; session.saveNow();
-  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); expect(saved.version).toBe(5);
+  const saved = JSON.parse(storage.getItem(SESSION_KEY)!); expect(saved.version).toBe(6);
   expect(Object.keys(saved.state.world.people).some(id => id.startsWith('generated-'))).toBe(false);
   const next = createSession(storage); expect(next.loadResult.ok).toBe(true); expect(next.state).toEqual(state);
   expect(next.state.dialogue.memories.lise.entries[0].mentionedAt).toBe(1440);

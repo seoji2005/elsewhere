@@ -46,7 +46,7 @@ it('C093: a v5 save opens with an empty tycoon container and unchanged money, le
   const raw = storage.getItem(SESSION_KEY)!; expect(JSON.parse(raw).version).toBe(5);
   const before = JSON.parse(raw).state;
   const empty = createSession(storage);
-  expect(empty.loadResult.ok).toBe(true); expect(empty.tycoon.state()).toEqual(emptyTycoon());
+  expect(empty.loadResult.ok).toBe(true); expect(empty.tycoon.state()).toEqual({ ...emptyTycoon(), systems: { haul: { load: {}, fee: false } } }); // C096: haul is registered
   const withSystems = createSession(storage, undefined, systems);
   for (const next of [empty, withSystems]) {
     expect(next.state.world.ledger.balances).toEqual(before.world.ledger.balances);

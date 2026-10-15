@@ -45,7 +45,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
   const stick = make('stick'), knob = make('knob', stick);
   const enter = make('enter', document.body, 'button'), toast = make('toast');
   const top = make('hud-top'), status = make('hud-status', top);
-  const [timeText, placeText, cashText, energyText, weatherText, warnText] = [0, 1, 2, 3, 4, 5].map(() => make('', status, 'span'));
+  const [timeText, placeText, cashText, energyText, weatherText, warnText, loadText] = [0, 1, 2, 3, 4, 5, 6].map(() => make('', status, 'span'));
   warnText.className = 'hud-warn';
   weatherText.className = 'hud-weather';
   const phone = make('hud-open', top, 'button', '결폰 열기');
@@ -311,6 +311,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     weatherText.textContent = shop.icon;
     weatherText.title = shop.name;
     warnText.textContent = shop.warning;
+    loadText.textContent = shop.load ? `📦×${shop.load}` : ''; // C096: boxes carried by hand
     pending ||= force;
     if (panel.hidden) return;
     const membership = tab === 'people'
