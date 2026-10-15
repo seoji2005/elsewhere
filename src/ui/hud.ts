@@ -30,7 +30,7 @@ const problems: Record<string, string> = {
 
 // Thumb UI over the canvas: joystick ring, door button, toast, status bar and the 결폰 panel driving the session.
 export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[], location: {
-  move: (placeId: string) => void; sync: () => void;
+  move: (placeId: string) => void; sync: () => void; talk: (npc: Npc) => void; warm: (npc: Npc) => void;
 }) {
   const { state } = session;
   const make = (className: string, parent: HTMLElement = document.body, tag = 'div', text = '') => {
@@ -158,6 +158,7 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
     return '지금은 소개해 줄 사람이 떠오르지 않네요.';
   }
   function person(npc: Npc) {
+    location.warm(npc); // the resident's avatar loads while the player reads, so 이야기하기 opens at once
     const head = make('hud-head', body);
     button(head, '‹ 목록', () => { selected = ''; });
     live(make('hud-name', head), () => `${npc.name} · ${stage(npc)}`);
@@ -188,12 +189,9 @@ export function hud(session: Session, residents: readonly (Npc | GeneratedNpc)[]
       return session.inviteHomeTea(uid('home-tea'), npc.id) ? '함께 차를 마셨어요' : '상대가 지금 집에 없어요';
     });
     const topics = make('hud-chips', body);
-    make('hud-sub', topics, 'span', '이야기');
-    npc.likes.forEach((topic, index) => button(topics, topic, speak(npc, () => {
-      const id = uid('chat'), { entry, line } = session.talk(id, npc.id, { id: `chat:${index}`, topic, tone: npc.traits[0] ?? 'quiet' });
-      bond(id, entry);
-      return line;
-    })));
+    // Chatting happens face to face: the panel closes and the dialogue scene (src/ui/talk.ts) takes over.
+    button(topics, '이야기하기', () => { show(''); location.talk(npc); });
+    live(make('hud-sub', topics, 'span'), () => `${npc.likes.join(' · ')} 이야기를 좋아해요`);
     const gifts = make('hud-chips', body);
     make('hud-sub', gifts, 'span', owned().length ? '선물' : '선물할 물건이 없어요');
     for (const item of owned()) button(gifts, item.name, speak(npc, () => {

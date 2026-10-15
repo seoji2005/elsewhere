@@ -16,6 +16,7 @@ import { cloudCards } from './anime/clouds';
 import { playerControls } from './player/controls';
 import { followPlayer } from './player/player';
 import { hud } from './ui/hud';
+import { talkScene } from './ui/talk';
 import { debugOverlay } from './ui/debug';
 import { paint } from './scene/props';
 import { createSession } from './game/session';
@@ -85,8 +86,12 @@ function syncPosition() {
     session.state.world.people.player.placeId = 'street';
   }
 }
-const ui = hud(session, [...npcs, ...generate(session.state.npcSeed, 50)], {
-  sync: syncPosition,
+const residents = [...npcs, ...generate(session.state.npcSeed, 50)];
+// Face-to-face dialogue: the resident's avatar steps in front of the player and the camera eases into a close-up.
+const talk = talkScene(session, scene, character.group, world.solids,
+  anime ? outfit => loadAvatar(camera, sd, outfit) : undefined, () => ui.open('people'));
+const ui = hud(session, residents, {
+  sync: syncPosition, talk: npc => { void talk.start(npc); }, warm: talk.warm,
   move(placeId) {
     const pose = doors.find(d => d.placeId === placeId)?.position;
     if (pose) { character.group.position.set(pose.x, 0, pose.z); character.group.rotation.y = pose.yaw; }
@@ -97,6 +102,14 @@ if (!session.loadResult.ok) ui.say('저장이 손상돼 새로 시작했어요')
 addEventListener('visibilitychange', () => { if (document.hidden) { syncPosition(); session.saveNow(); } });
 const [phoneTab, phonePlace] = (query.get('phone') ?? '').split(',');
 if (phoneTab) ui.open(phoneTab, phonePlace);
+// ?talk=<placeId>[,<npcId>] (screenshots): go there and open the dialogue with that or the first resident present.
+const [talkPlace, talkNpc] = (query.get('talk') ?? '').split(',');
+if (talkPlace) {
+  ui.open('', talkPlace);
+  const here = residents.filter(n => session.state.world.people[n.id]?.placeId === session.state.player.placeId);
+  const npc = here.find(n => n.id === talkNpc) ?? here[0];
+  if (npc) await talk.start(npc, true);
+}
 const controls = playerControls(renderer.domElement, ui.stick, ui.knob);
 // ?cast=1: the zebra crossing by the corner is the only open ground (sidewalks are 1.3 m deep). A half ring behind
 // the player as seen from the start camera, everyone turned to the camera, so no bollard, planter or back covers a face.
@@ -203,7 +216,9 @@ let previous = performance.now(), positionElapsed = 0, status = { speed: 0, near
 renderer.setAnimationLoop(now => {
   const dt = (now - previous) / 1000;
   resolution.sample(dt); previous = now;
-  status = follow(Math.min(dt, 0.1), move ? { x: 0, y: move } : controls.stickInput(), controls.state);
+  status = follow(Math.min(dt, 0.1), talk.active() ? { x: 0, y: 0 } : move ? { x: 0, y: move } : controls.stickInput(),
+    controls.state, talk.closeup());
+  talk.update(dt);
   character.update(status.speed, Math.min(dt, 0.1));
   const at = character.group.position; // only the two hero shops have a sim door; other façades stay closed
   ui.door(status.near ? doors.find(door => Math.hypot(door.position.x - at.x, door.position.z - at.z) < 3) : undefined);
