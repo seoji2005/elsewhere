@@ -1,0 +1,521 @@
+<title>골목 가게 그래픽 콘셉트</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&display=swap');
+:root{
+  --bg:#f4efe6; --surface:#fffaf2; --ink:#231f2e; --muted:#5d566b; --line:#ddd2c2;
+  --accent:#c9572c; --chip:#efe3d0;
+  --font:'Gowun Dodum','Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16151f; --surface:#211f2c; --ink:#efe9df; --muted:#aaa2b6; --line:#36334a;
+    --accent:#f0905c; --chip:#2c2a3b; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#16151f; --surface:#211f2c; --ink:#efe9df; --muted:#aaa2b6; --line:#36334a;
+  --accent:#f0905c; --chip:#2c2a3b; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);line-height:1.6;
+  padding-inline:max(16px,env(safe-area-inset-left));padding-block:10px 40px}
+.wrap{max-width:1100px;margin:0 auto}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 8px}
+h1{font-size:1.05rem;margin:0;font-weight:700}
+header p{margin:0;color:var(--muted);font-size:.82rem}
+figure{margin:0 0 28px;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+figure>svg{display:block;width:100%;max-width:100%;height:auto;margin:0 auto;
+  max-height:calc(100svh - 64px)}
+figure svg text{font-family:var(--font)}
+figcaption{padding:10px 14px 14px}
+figcaption h2{font-size:1rem;margin:0 0 4px;display:flex;gap:8px;align-items:center}
+figcaption h2 span{font-size:.75rem;background:var(--chip);color:var(--accent);border-radius:99px;padding:1px 9px}
+figcaption p{margin:0;color:var(--muted);font-size:.9rem}
+footer{color:var(--muted);font-size:.8rem;text-align:center}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="dusk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232b55"/><stop offset=".45" stop-color="#4b4677"/>
+      <stop offset=".75" stop-color="#c46f68"/><stop offset="1" stop-color="#f3a964"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffd88a" stop-opacity=".75"/><stop offset="1" stop-color="#ffb35c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coolglow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#d8f1ff" stop-opacity=".7"/><stop offset="1" stop-color="#9fd4ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shopin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe2a0"/><stop offset="1" stop-color="#f5a95a"/>
+    </linearGradient>
+    <!-- 사람: 약 3.6등신, 색은 --hair --top --bottom --skin, 뒷모습은 --back -->
+    <symbol id="person" viewBox="0 0 80 220" overflow="visible">
+      <g stroke="#1e1a2c" stroke-width="3.5" stroke-linejoin="round">
+        <rect x="25" y="148" width="13" height="62" rx="5" fill="var(--bottom,#3b3f5c)"/>
+        <rect x="42" y="148" width="13" height="62" rx="5" fill="var(--bottom,#3b3f5c)"/>
+        <rect x="20" y="204" width="20" height="11" rx="5" fill="#2a2438"/>
+        <rect x="40" y="204" width="20" height="11" rx="5" fill="#2a2438"/>
+        <rect x="7" y="90" width="13" height="56" rx="6" fill="var(--top,#7b8fb8)"/>
+        <rect x="60" y="90" width="13" height="56" rx="6" fill="var(--top,#7b8fb8)"/>
+        <circle cx="13.5" cy="148" r="7" fill="var(--skin,#f3d3b9)"/>
+        <circle cx="66.5" cy="148" r="7" fill="var(--skin,#f3d3b9)"/>
+        <rect x="15" y="82" width="50" height="76" rx="15" fill="var(--top,#7b8fb8)"/>
+        <rect x="34" y="72" width="12" height="14" fill="var(--skin,#f3d3b9)"/>
+        <circle cx="40" cy="47" r="30" fill="var(--skin,#f3d3b9)"/>
+        <path d="M9 54 Q5 14 40 13 Q75 14 71 54 Q66 34 52 30 Q41 41 23 34 Q15 42 9 54Z" fill="var(--hair,#3a2c2c)"/>
+      </g>
+      <ellipse cx="30" cy="53" rx="3.2" ry="4.2" fill="#1e1a2c"/>
+      <ellipse cx="50" cy="53" rx="3.2" ry="4.2" fill="#1e1a2c"/>
+      <ellipse cx="25" cy="62" rx="5" ry="2.5" fill="#f19a8c" opacity=".55"/>
+      <ellipse cx="55" cy="62" rx="5" ry="2.5" fill="#f19a8c" opacity=".55"/>
+      <circle cx="40" cy="47" r="30" fill="var(--back,transparent)" stroke="var(--backline,transparent)" stroke-width="3.5"/>
+    </symbol>
+    <symbol id="lantern" viewBox="0 0 40 60" overflow="visible">
+      <rect x="14" y="0" width="12" height="6" fill="#2b2333"/>
+      <ellipse cx="20" cy="30" rx="18" ry="24" fill="#e8673a" stroke="#1e1a2c" stroke-width="3"/>
+      <ellipse cx="15" cy="27" rx="6" ry="14" fill="#ffb26b" opacity=".7"/>
+      <path d="M4 24 H36 M3 34 H37" stroke="#9d3c22" stroke-width="2"/>
+      <rect x="14" y="53" width="12" height="6" fill="#2b2333"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+<header>
+  <h1>골목 가게 그래픽 콘셉트</h1>
+  <p>도쿄 상점가를 닮은 가상 도시 · 차분한 셀 애니 일러스트 · 해질녘</p>
+</header>
+
+<!-- 1. 해질녘 골목 상점가 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="해질녘 골목 상점가의 작은 가게 앞에 손님 다섯 명이 줄을 서 있고 주차 빌런 차가 서 있는 장면">
+  <rect width="1600" height="900" fill="url(#dusk)"/>
+  <circle cx="1260" cy="560" r="120" fill="#ffd28a" opacity=".35"/>
+  <!-- 먼 건물 -->
+  <g fill="#3a3c68">
+    <rect x="0" y="210" width="190" height="480"/><rect x="180" y="260" width="160" height="430"/>
+    <rect x="330" y="170" width="210" height="520"/><rect x="1080" y="230" width="180" height="460"/>
+    <rect x="1250" y="150" width="200" height="540"/><rect x="1440" y="250" width="170" height="440"/>
+  </g>
+  <g fill="#ffcf7a">
+    <rect x="30" y="250" width="34" height="26"/><rect x="110" y="300" width="34" height="26"/><rect x="380" y="220" width="30" height="24"/>
+    <rect x="460" y="290" width="30" height="24"/><rect x="1290" y="200" width="32" height="24"/><rect x="1370" y="260" width="32" height="24"/>
+    <rect x="1480" y="300" width="30" height="24"/><rect x="1120" y="280" width="30" height="24"/>
+  </g>
+  <g fill="#2f3058"><rect x="30" y="300" width="34" height="26"/><rect x="380" y="290" width="30" height="24"/><rect x="1290" y="260" width="32" height="24"/></g>
+  <!-- 전봇대·전선 -->
+  <g stroke="#1e1a2c" fill="none">
+    <path d="M0 250 Q400 300 820 250 T1600 230" stroke-width="3"/>
+    <path d="M0 275 Q420 330 820 278 T1600 262" stroke-width="2.5"/>
+    <rect x="148" y="150" width="16" height="560" fill="#2a2840" stroke-width="3"/>
+    <rect x="118" y="230" width="76" height="10" fill="#2a2840" stroke-width="3"/>
+  </g>
+  <!-- 왼쪽 이웃 가게(셔터 반쯤) -->
+  <g stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round">
+    <rect x="200" y="380" width="350" height="310" fill="#55557e"/>
+    <rect x="200" y="380" width="350" height="40" fill="#2f2e4c"/>
+    <rect x="225" y="440" width="300" height="250" fill="#ffc47a"/>
+    <rect x="225" y="440" width="300" height="140" fill="#8c8aa8"/>
+    <path d="M225 470 H525 M225 500 H525 M225 530 H525 M225 560 H525" stroke-width="2"/>
+  </g>
+  <!-- 내 가게 -->
+  <ellipse cx="830" cy="660" rx="430" ry="150" fill="url(#glow)"/>
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <rect x="570" y="300" width="520" height="180" fill="#7a5640"/>
+    <rect x="570" y="300" width="520" height="180" fill="#5e4031" opacity=".0"/>
+    <rect x="600" y="330" width="130" height="100" fill="#ffcf7a"/><rect x="930" y="330" width="130" height="100" fill="#ffcf7a"/>
+    <path d="M665 330 V430 M995 330 V430" stroke-width="3"/>
+    <rect x="745" y="330" width="170" height="54" rx="6" fill="#efe1c4"/>
+    <path d="M540 300 L830 255 L1120 300 Z" fill="#2c2b47"/>
+    <rect x="540" y="470" width="580" height="28" fill="#2c2b47"/>
+    <rect x="585" y="498" width="490" height="192" fill="url(#shopin)"/>
+  </g>
+  <text x="830" y="369" text-anchor="middle" font-size="32" fill="#3b2a22">빵·차·우유</text>
+  <!-- 가게 안 진열대 -->
+  <g fill="#9a6644" stroke="#1e1a2c" stroke-width="3"><rect x="610" y="560" width="120" height="120"/><rect x="940" y="560" width="120" height="120"/></g>
+  <g fill="#c98a52"><circle cx="635" cy="585" r="11"/><circle cx="665" cy="585" r="11"/><circle cx="700" cy="585" r="11"/><rect x="960" y="575" width="18" height="24"/><rect x="988" y="575" width="18" height="24"/><rect x="1016" y="575" width="18" height="24"/></g>
+  <!-- 노렌 -->
+  <g stroke="#1e1a2c" stroke-width="4">
+    <rect x="720" y="498" width="54" height="96" fill="#2f3d78"/><rect x="777" y="498" width="54" height="96" fill="#2f3d78"/>
+    <rect x="834" y="498" width="54" height="96" fill="#2f3d78"/><rect x="891" y="498" width="54" height="96" fill="#2f3d78"/>
+  </g>
+  <g font-size="34" fill="#f4ead8" text-anchor="middle"><text x="747" y="560">골</text><text x="804" y="560">목</text><text x="861" y="560">상</text><text x="918" y="560">회</text></g>
+  <use href="#lantern" x="582" y="500" width="40" height="60"/>
+  <use href="#lantern" x="1038" y="500" width="40" height="60"/>
+  <circle cx="602" cy="530" r="60" fill="url(#glow)"/><circle cx="1058" cy="530" r="60" fill="url(#glow)"/>
+  <!-- 자판기 -->
+  <g stroke="#1e1a2c" stroke-width="4"><rect x="1135" y="540" width="90" height="150" rx="6" fill="#d9e6ef"/><rect x="1148" y="555" width="64" height="70" fill="#a9d5f0"/></g>
+  <g fill="#e8673a"><rect x="1154" y="562" width="12" height="22"/><rect x="1174" y="562" width="12" height="22" fill="#5aa36a"/><rect x="1194" y="562" width="12" height="22" fill="#e8c23a"/></g>
+  <!-- 오른쪽 식당 -->
+  <g stroke="#1e1a2c" stroke-width="4"><rect x="1240" y="420" width="360" height="270" fill="#4e4b78"/><rect x="1265" y="470" width="190" height="130" fill="#ffcf7a"/><path d="M1240 420 h360 l-20 40 h-320 z" fill="#b5503a"/></g>
+  <!-- 바닥 -->
+  <rect x="0" y="690" width="1600" height="60" fill="#6a6280"/>
+  <rect x="0" y="750" width="1600" height="150" fill="#3e3a55"/>
+  <path d="M0 756 H1600" stroke="#e9e1d4" stroke-width="4" stroke-dasharray="40 26"/>
+  <ellipse cx="830" cy="720" rx="330" ry="40" fill="#ffcf7a" opacity=".22"/>
+  <!-- 줄 선 손님 -->
+  <use href="#person" x="640" y="544" width="72" height="198" style="--hair:#2e2430;--top:#6d86b8;--bottom:#2f3350;--back:#2e2430"/>
+  <use href="#person" x="728" y="540" width="72" height="198" style="--hair:#6b3f2a;--top:#e3b45c;--bottom:#4b5b7a"/>
+  <use href="#person" x="822" y="546" width="72" height="198" style="--hair:#c9c1b5;--top:#7c9c78;--bottom:#55504a"/>
+  <use href="#person" x="912" y="536" width="72" height="198" style="--hair:#1f1b26;--top:#3d4466;--bottom:#2a2d40"/>
+  <use href="#person" x="1004" y="542" width="72" height="198" style="--hair:#8a4a3a;--top:#d47a6a;--bottom:#3f4a6b"/>
+  <!-- 인내 막대(줄 끝) -->
+  <rect x="1004" y="522" width="72" height="12" rx="6" fill="#2a2640" stroke="#1e1a2c" stroke-width="2"/>
+  <rect x="1006" y="524" width="48" height="8" rx="4" fill="#f0a24a"/>
+  <!-- 주차 빌런 차 -->
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <path d="M1170 820 V770 Q1175 745 1210 742 L1265 700 Q1280 690 1310 690 H1440 Q1470 690 1490 715 L1515 742 Q1560 748 1565 780 V820 Z" fill="#f2f0ea"/>
+    <path d="M1280 742 L1312 708 H1380 V742 Z M1395 742 V708 H1440 Q1460 708 1474 728 L1484 742 Z" fill="#7aa6c8"/>
+    <circle cx="1240" cy="822" r="30" fill="#2a2438"/><circle cx="1495" cy="822" r="30" fill="#2a2438"/>
+  </g>
+  <circle cx="1240" cy="822" r="11" fill="#9c96aa"/><circle cx="1495" cy="822" r="11" fill="#9c96aa"/>
+  <circle cx="1560" cy="770" r="9" fill="#ffad3b"/><circle cx="1560" cy="770" r="26" fill="#ffad3b" opacity=".35"/>
+  <circle cx="1178" cy="770" r="9" fill="#ffad3b"/><circle cx="1178" cy="770" r="26" fill="#ffad3b" opacity=".35"/>
+  <!-- 말풍선 -->
+  <g font-size="30" fill="#1e1a2c">
+    <g><rect x="620" y="400" width="220" height="62" rx="24" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4"/><path d="M740 460 l12 40 l14 -40" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M742 458 h22" stroke="#fffaf0" stroke-width="6"/><text x="730" y="441" text-anchor="middle">늘 사던 거요</text></g>
+    <g><rect x="930" y="400" width="250" height="62" rx="24" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4"/><path d="M1030 460 l12 34 l14 -34" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M1032 458 h22" stroke="#fffaf0" stroke-width="6"/><text x="1055" y="441" text-anchor="middle">여기 줄인가요?</text></g>
+    <g><rect x="1220" y="590" width="330" height="62" rx="24" fill="#fff3d8" stroke="#1e1a2c" stroke-width="4"/><path d="M1330 650 l-6 26 l26 -26" fill="#fff3d8" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M1328 648 h22" stroke="#fff3d8" stroke-width="6"/><text x="1385" y="631" text-anchor="middle">잠깐만 세워 둘게요~</text></g>
+  </g>
+</svg>
+<figcaption>
+  <h2>해질녘 골목 상점가 <span>장면 1</span></h2>
+  <p>내 작은 가게 앞에 줄이 서고, 손님들이 지나가며 한마디씩 합니다. 붐빌수록 말풍선이 늘고 줄 끝 손님의 인내 막대가 보여요. 가게 앞을 막은 차도 손님 한 명처럼 대해야 합니다.</p>
+</figcaption>
+</figure>
+
+<!-- 2. 계산대 시점 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="사장 시점의 계산대. 줄 맨 앞 손님이 흥정하고, 오른쪽 아래에 계산 버튼과 깎아 주기·정가 버튼이 있는 게임 화면">
+  <rect width="1600" height="900" fill="#e7c08a"/>
+  <rect y="0" width="1600" height="90" fill="#c99a68"/>
+  <!-- 창문 -->
+  <g stroke="#1e1a2c" stroke-width="5"><rect x="1220" y="130" width="300" height="300" fill="url(#dusk)"/><path d="M1370 130 V430 M1220 280 H1520" stroke-width="4"/></g>
+  <g opacity=".85">
+    <use href="#person" x="1250" y="300" width="44" height="122" style="--hair:#1f1b26;--top:#3d4466;--back:#1f1b26"/>
+    <use href="#person" x="1310" y="306" width="44" height="122" style="--hair:#8a4a3a;--top:#d47a6a;--back:#8a4a3a"/>
+    <use href="#person" x="1420" y="300" width="44" height="122" style="--hair:#c9c1b5;--top:#7c9c78;--back:#c9c1b5"/>
+  </g>
+  <!-- 진열대 -->
+  <g stroke="#1e1a2c" stroke-width="4">
+    <rect x="80" y="120" width="1080" height="470" fill="#b98657"/>
+    <rect x="100" y="140" width="1040" height="130" fill="#d7a874"/><rect x="100" y="290" width="1040" height="130" fill="#d7a874"/><rect x="100" y="440" width="1040" height="130" fill="#d7a874"/>
+  </g>
+  <g stroke="#1e1a2c" stroke-width="3">
+    <g fill="#e8d6b0"><rect x="130" y="180" width="60" height="80"/><rect x="200" y="180" width="60" height="80"/><rect x="270" y="180" width="60" height="80"/><rect x="860" y="190" width="70" height="70"/><rect x="940" y="190" width="70" height="70"/></g>
+    <g fill="#c98a52"><ellipse cx="160" cy="385" rx="44" ry="28"/><ellipse cx="260" cy="385" rx="44" ry="28"/><ellipse cx="360" cy="385" rx="44" ry="28"/><ellipse cx="900" cy="385" rx="44" ry="28"/><ellipse cx="1000" cy="385" rx="44" ry="28"/></g>
+    <g fill="#5a8f6e"><rect x="130" y="490" width="50" height="76"/><rect x="190" y="490" width="50" height="76"/><rect x="250" y="490" width="50" height="76"/><rect x="900" y="490" width="50" height="76" fill="#f2f0ea"/><rect x="960" y="490" width="50" height="76" fill="#f2f0ea"/><rect x="1020" y="490" width="50" height="76" fill="#f2f0ea"/></g>
+  </g>
+  <rect x="92" y="282" width="1056" height="146" rx="10" fill="none" stroke="#e8673a" stroke-width="5" stroke-dasharray="18 12"/>
+  <rect x="96" y="250" width="150" height="36" rx="18" fill="#e8673a"/><text x="171" y="276" text-anchor="middle" font-size="24" fill="#fff">눈높이 칸</text>
+  <!-- 손님 -->
+  <use href="#person" x="560" y="200" width="190" height="522" style="--hair:#6b3f2a;--top:#e3b45c;--bottom:#4b5b7a"/>
+  <!-- 계산대 -->
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <rect x="-10" y="610" width="1620" height="60" fill="#a8714a"/>
+    <rect x="-10" y="670" width="1620" height="240" fill="#7b4f35"/>
+    <rect x="980" y="470" width="230" height="150" rx="10" fill="#3b3d58"/><rect x="1000" y="488" width="190" height="64" fill="#bfe3c8"/>
+    <rect x="1030" y="565" width="40" height="28" fill="#e9e1d4"/><rect x="1080" y="565" width="40" height="28" fill="#e9e1d4"/><rect x="1130" y="565" width="40" height="28" fill="#e9e1d4"/>
+    <ellipse cx="400" cy="600" rx="90" ry="38" fill="#d39a5a"/><rect x="510" y="530" width="60" height="85" fill="#f2f0ea"/><rect x="820" y="555" width="80" height="60" rx="10" fill="#5a8f6e"/>
+  </g>
+  <text x="1095" y="533" text-anchor="middle" font-size="34" fill="#1e1a2c">14결</text>
+  <!-- 사장 손 -->
+  <g stroke="#1e1a2c" stroke-width="5">
+    <rect x="470" y="760" width="140" height="160" rx="30" fill="#2f3d78"/><rect x="760" y="760" width="140" height="160" rx="30" fill="#2f3d78"/>
+    <ellipse cx="540" cy="745" rx="62" ry="44" fill="#f3d3b9"/><ellipse cx="830" cy="745" rx="62" ry="44" fill="#f3d3b9"/>
+  </g>
+  <!-- UI -->
+  <g font-size="28">
+    <rect x="30" y="24" width="290" height="56" rx="28" fill="#1e1a2c" opacity=".85"/>
+    <text x="56" y="62" fill="#fff">18:40</text><rect x="160" y="34" width="140" height="36" rx="18" fill="#e8673a"/><text x="230" y="61" text-anchor="middle" fill="#fff" font-size="24">북적 · 줄 4</text>
+    <rect x="1340" y="24" width="230" height="56" rx="28" fill="#1e1a2c" opacity=".85"/><text x="1555" y="62" text-anchor="end" fill="#ffd27a">1,284결</text>
+  </g>
+  <g font-size="32" fill="#1e1a2c">
+    <rect x="760" y="140" width="400" height="84" rx="28" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4"/>
+    <path d="M790 222 l-24 28 l46 -28" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M792 220 h24" stroke="#fffaf0" stroke-width="6"/>
+    <text x="960" y="190" text-anchor="middle">조금만 깎아 주시면…?</text>
+    <rect x="800" y="204" width="320" height="10" rx="5" fill="#2a2640"/><rect x="802" y="206" width="190" height="6" rx="3" fill="#f0a24a"/>
+  </g>
+  <circle cx="1460" cy="770" r="220" fill="#ffffff" opacity=".12"/>
+  <g stroke="#1e1a2c" stroke-width="5">
+    <rect x="1130" y="560" width="210" height="76" rx="38" fill="#fffaf0"/>
+    <rect x="1130" y="656" width="210" height="76" rx="38" fill="#fffaf0"/>
+    <circle cx="1465" cy="770" r="100" fill="#e8673a"/>
+  </g>
+  <g text-anchor="middle" fill="#1e1a2c" font-size="32"><text x="1235" y="609">깎아 주기</text><text x="1235" y="705">정가</text></g>
+  <text x="1465" y="786" text-anchor="middle" font-size="46" fill="#fff">계산</text>
+</svg>
+<figcaption>
+  <h2>계산대 시점 <span>장면 2</span></h2>
+  <p>사장 자리에서 직접 손님을 받습니다. 엄지가 닿는 오른쪽 아래에 큰 ‘계산’ 버튼이 있고, 흥정하는 손님에게는 깎아 줄지 정가를 지킬지 한 번에 고르세요. 잘 팔리는 물건은 눈높이 칸에 둡니다.</p>
+</figcaption>
+</figure>
+
+<!-- 3. 직접 운반 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="상자 다섯 개를 든 주인공이 찻잎 가게와 빵집에서 골목을 따라 내 가게로 걸어가는 장면">
+  <rect width="1600" height="900" fill="url(#dusk)"/>
+  <g fill="#3a3c68"><rect x="0" y="200" width="300" height="500"/><rect x="820" y="240" width="260" height="460"/><rect x="1060" y="180" width="300" height="520"/><rect x="1350" y="260" width="260" height="440"/></g>
+  <g fill="#ffcf7a"><rect x="900" y="280" width="30" height="24"/><rect x="1110" y="230" width="30" height="24"/><rect x="1230" y="300" width="30" height="24"/><rect x="40" y="250" width="34" height="26"/></g>
+  <path d="M0 230 Q500 290 1000 240 T1600 250" stroke="#1e1a2c" stroke-width="3" fill="none"/>
+  <!-- 찻잎 가게 -->
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <rect x="40" y="380" width="380" height="310" fill="#6c5a48"/>
+    <rect x="20" y="360" width="420" height="40" fill="#2c2b47"/>
+    <rect x="70" y="440" width="320" height="250" fill="#ffd690"/>
+    <rect x="110" y="400" width="80" height="96" fill="#3f6b4e"/><rect x="194" y="400" width="80" height="96" fill="#3f6b4e"/><rect x="278" y="400" width="80" height="96" fill="#3f6b4e"/>
+    <rect x="90" y="610" width="70" height="80" rx="20" fill="#c7a77a"/><rect x="170" y="620" width="70" height="70" rx="20" fill="#c7a77a"/>
+  </g>
+  <g font-size="38" fill="#f4ead8" text-anchor="middle"><text x="150" y="462">찻</text><text x="234" y="462">잎</text><text x="318" y="462">집</text></g>
+  <!-- 빵집 -->
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <rect x="450" y="400" width="350" height="290" fill="#e8dcc6"/>
+    <path d="M430 400 H820 L800 470 H450 Z" fill="#c9572c"/>
+    <path d="M495 400 L485 470 M560 400 L550 470 M625 400 L620 470 M690 400 L688 470 M755 400 L755 470" stroke="#f3e5cf" stroke-width="16"/>
+    <path d="M430 400 H820 L800 470 H450 Z" fill="none"/>
+    <rect x="480" y="500" width="190" height="130" fill="#ffcf7a"/>
+    <rect x="690" y="500" width="80" height="190" fill="#8a5a3c"/>
+  </g>
+  <g fill="#c98a52" stroke="#1e1a2c" stroke-width="3"><ellipse cx="520" cy="600" rx="28" ry="16"/><ellipse cx="580" cy="600" rx="28" ry="16"/><ellipse cx="635" cy="600" rx="24" ry="16"/><circle cx="550" cy="560" r="16"/><circle cx="610" cy="560" r="16"/></g>
+  <use href="#person" x="700" y="520" width="62" height="170" style="--hair:#f2efe8;--top:#f2efe8;--bottom:#55504a;--skin:#e9c3a5"/>
+  <!-- 먼 내 가게 -->
+  <g stroke="#1e1a2c" stroke-width="4"><rect x="1360" y="470" width="200" height="220" fill="#7a5640"/><path d="M1345 470 L1460 440 L1575 470 Z" fill="#2c2b47"/><rect x="1380" y="560" width="160" height="130" fill="url(#shopin)"/><rect x="1400" y="560" width="120" height="44" fill="#2f3d78"/></g>
+  <use href="#lantern" x="1366" y="566" width="22" height="33"/><use href="#lantern" x="1534" y="566" width="22" height="33"/>
+  <ellipse cx="1460" cy="690" rx="160" ry="40" fill="url(#glow)"/>
+  <!-- 바닥 -->
+  <rect x="0" y="690" width="1600" height="210" fill="#5d5674"/>
+  <path d="M0 700 H1600" stroke="#3e3a55" stroke-width="6"/>
+  <path d="M820 820 Q1100 800 1350 720" stroke="#ffd27a" stroke-width="6" stroke-dasharray="4 22" stroke-linecap="round" fill="none"/>
+  <!-- 주인공 + 상자 -->
+  <ellipse cx="960" cy="842" rx="80" ry="14" fill="#1e1a2c" opacity=".3"/>
+  <use href="#person" x="900" y="560" width="110" height="302" style="--hair:#2b2230;--top:#f0ead8;--bottom:#2f3d78"/>
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round" fill="#d4a46a">
+    <rect x="890" y="782" width="130" height="62"/><rect x="900" y="724" width="112" height="60"/><rect x="908" y="670" width="96" height="56" fill="#c9955c"/>
+  </g>
+  <path d="M955 782 V844 M956 724 V784 M956 670 V726" stroke="#8a5a3c" stroke-width="4"/>
+  <g stroke="#f4ead8" stroke-width="5" stroke-linecap="round" opacity=".7"><path d="M840 700 H870 M830 740 H866 M845 780 H872"/></g>
+  <!-- 생산자 말풍선 -->
+  <rect x="560" y="420" width="0" height="0"/>
+  <g font-size="28" fill="#1e1a2c">
+    <rect x="610" y="330" width="330" height="60" rx="24" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4"/>
+    <path d="M720 388 l-6 24 l26 -24" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M718 386 h24" stroke="#fffaf0" stroke-width="6"/>
+    <text x="775" y="370" text-anchor="middle">다섯 상자, 조심히 가요!</text>
+  </g>
+  <!-- 상단 짐 표시 -->
+  <g>
+    <rect x="30" y="24" width="470" height="72" rx="36" fill="#1e1a2c" opacity=".85"/>
+    <g stroke="#1e1a2c" stroke-width="3"><rect x="56" y="38" width="48" height="44" rx="4" fill="#d4a46a"/></g><path d="M80 38 V82" stroke="#8a5a3c" stroke-width="3"/>
+    <text x="116" y="74" font-size="36" fill="#fff">×5</text>
+    <text x="196" y="72" font-size="28" fill="#ffd27a">배달비 아낌 +40결</text>
+    <rect x="1170" y="24" width="400" height="72" rx="36" fill="#1e1a2c" opacity=".85"/>
+    <circle cx="1210" cy="60" r="20" fill="none" stroke="#fff" stroke-width="4"/><path d="M1210 46 V60 L1220 66" stroke="#fff" stroke-width="4" fill="none"/>
+    <text x="1245" y="72" font-size="28" fill="#fff">가게 비움 6분 · 줄 +2</text>
+  </g>
+</svg>
+<figcaption>
+  <h2>직접 운반 <span>장면 3</span></h2>
+  <p>도매 상자를 배달시키지 않고 직접 들고 오면 배달비를 아낄 수 있어요. 대신 가게를 비우는 동안 줄이 길어집니다. 찻잎집·빵집 사장님과 얼굴을 익히는 것도 이 길에서예요.</p>
+</figcaption>
+</figure>
+
+<!-- 4. 결폰 업무 탭 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="게임 속 스마트폰 결폰의 업무 탭. 단골 미나의 고민 한 문장과 버튼 두 개, 옆에 광고를 채널·대상·메시지 순서로 고르는 카드">
+  <rect width="1600" height="900" fill="#2b2d4f"/>
+  <ellipse cx="1200" cy="760" rx="600" ry="260" fill="url(#glow)" opacity=".5"/>
+  <g opacity=".35" fill="#4a4c78"><rect x="0" y="120" width="1600" height="30"/><rect x="0" y="300" width="1600" height="30"/><rect x="0" y="480" width="1600" height="30"/></g>
+  <!-- 폰 -->
+  <g stroke="#1e1a2c" stroke-width="6">
+    <rect x="160" y="40" width="470" height="830" rx="56" fill="#1a1828"/>
+    <rect x="182" y="62" width="426" height="786" rx="40" fill="#f7f0e4"/>
+  </g>
+  <rect x="345" y="76" width="100" height="16" rx="8" fill="#1a1828"/>
+  <g font-size="28" text-anchor="middle">
+    <text x="255" y="148" fill="#8a8296">메시지</text>
+    <rect x="335" y="114" width="120" height="48" rx="24" fill="#e8673a"/><text x="395" y="148" fill="#fff">업무</text>
+    <text x="530" y="148" fill="#8a8296">사진첩</text>
+  </g>
+  <rect x="210" y="190" width="370" height="560" rx="28" fill="#fffaf2" stroke="#ddd2c2" stroke-width="3"/>
+  <circle cx="395" cy="300" r="78" fill="#f0d9b8"/>
+  <svg x="335" y="226" width="120" height="150" viewBox="0 0 80 100"><g stroke="#1e1a2c" stroke-width="3.5"><rect x="15" y="82" width="50" height="30" rx="14" fill="#d47a6a"/><circle cx="40" cy="47" r="30" fill="#f3d3b9"/><path d="M9 54 Q5 14 40 13 Q75 14 71 54 Q66 34 52 30 Q41 41 23 34 Q15 42 9 54Z" fill="#6b3f2a"/></g><ellipse cx="30" cy="54" rx="3" ry="4" fill="#1e1a2c"/><ellipse cx="50" cy="54" rx="3" ry="4" fill="#1e1a2c"/><path d="M33 66 Q40 62 47 66" stroke="#1e1a2c" stroke-width="2.5" fill="none"/></svg>
+  <text x="395" y="418" text-anchor="middle" font-size="30" fill="#231f2e">미나 · 단골</text>
+  <text x="395" y="452" text-anchor="middle" font-size="22" fill="#8a8296">도시락 가게 사장</text>
+  <text x="395" y="518" text-anchor="middle" font-size="31" fill="#231f2e">“요즘 주문이 자꾸 빠져요…”</text>
+  <text x="395" y="556" text-anchor="middle" font-size="21" fill="#8a8296">전화가 몰리면 적어 둔 게 사라진대요</text>
+  <rect x="235" y="590" width="320" height="64" rx="32" fill="#e8673a"/><text x="395" y="632" text-anchor="middle" font-size="28" fill="#fff">자세히 들어 볼게요</text>
+  <rect x="235" y="668" width="320" height="60" rx="30" fill="none" stroke="#c9b8a2" stroke-width="3"/><text x="395" y="708" text-anchor="middle" font-size="26" fill="#5d566b">다음에요</text>
+  <text x="395" y="800" text-anchor="middle" font-size="22" fill="#8a8296">읽는 동안 시간은 멈춰요</text>
+  <!-- 광고 고르기 -->
+  <text x="720" y="110" font-size="36" fill="#f4ead8">광고 하나 고르기</text>
+  <g font-size="26">
+    <rect x="720" y="140" width="820" height="190" rx="26" fill="#fffaf2" stroke="#1e1a2c" stroke-width="4"/>
+    <circle cx="768" cy="190" r="26" fill="#e8673a"/><text x="768" y="200" text-anchor="middle" fill="#fff">1</text>
+    <text x="810" y="200" fill="#231f2e" font-size="30">어디에 · 채널</text>
+    <rect x="760" y="240" width="150" height="58" rx="29" fill="#2f3d78"/><text x="835" y="279" text-anchor="middle" fill="#fff">전단</text>
+    <rect x="925" y="240" width="150" height="58" rx="29" fill="#efe3d0"/><text x="1000" y="279" text-anchor="middle" fill="#5d566b">SNS</text>
+    <rect x="1090" y="240" width="150" height="58" rx="29" fill="#efe3d0"/><text x="1165" y="279" text-anchor="middle" fill="#5d566b">현수막</text>
+    <rect x="1255" y="240" width="150" height="58" rx="29" fill="#efe3d0"/><text x="1330" y="279" text-anchor="middle" fill="#5d566b">버스</text>
+
+    <path d="M1130 336 v26 m-12 -12 l12 14 l12 -14" stroke="#f4ead8" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <rect x="720" y="372" width="820" height="190" rx="26" fill="#fffaf2" stroke="#1e1a2c" stroke-width="4"/>
+    <circle cx="768" cy="422" r="26" fill="#e8673a"/><text x="768" y="432" text-anchor="middle" fill="#fff">2</text>
+    <text x="810" y="432" fill="#231f2e" font-size="30">누구에게 · 대상</text>
+    <rect x="760" y="472" width="250" height="58" rx="29" fill="#2f3d78"/><text x="885" y="511" text-anchor="middle" fill="#fff">퇴근길 직장인</text>
+    <rect x="1025" y="472" width="150" height="58" rx="29" fill="#efe3d0"/><text x="1100" y="511" text-anchor="middle" fill="#5d566b">학생</text>
+    <rect x="1190" y="472" width="150" height="58" rx="29" fill="#efe3d0"/><text x="1265" y="511" text-anchor="middle" fill="#5d566b">어르신</text>
+
+    <path d="M1130 568 v26 m-12 -12 l12 14 l12 -14" stroke="#f4ead8" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <rect x="720" y="604" width="820" height="170" rx="26" fill="#fffaf2" stroke="#1e1a2c" stroke-width="4"/>
+    <circle cx="768" cy="654" r="26" fill="#e8673a"/><text x="768" y="664" text-anchor="middle" fill="#fff">3</text>
+    <text x="810" y="664" fill="#231f2e" font-size="30">어떻게 · 메시지</text>
+    <rect x="760" y="700" width="380" height="54" rx="27" fill="#2f3d78"/><text x="950" y="737" text-anchor="middle" fill="#fff">“퇴근길 5분, 따뜻한 빵”</text>
+    <rect x="1155" y="700" width="210" height="54" rx="27" fill="#efe3d0"/><text x="1260" y="737" text-anchor="middle" fill="#5d566b">단골 할인</text>
+  </g>
+  <g font-size="26" fill="#1e1a2c">
+    <rect x="860" y="800" width="560" height="62" rx="24" fill="#fff3d8" stroke="#1e1a2c" stroke-width="4"/>
+    <text x="1140" y="841" text-anchor="middle">효과는 손님 말로: “전단 보고 왔어요”</text>
+  </g>
+</svg>
+<figcaption>
+  <h2>결폰 ‘업무’ 탭 <span>장면 4</span></h2>
+  <p>게임 속 스마트폰이 메뉴예요. 한 화면에 사람 한 명, 한 문장, 버튼 두 개만 보입니다. 단골의 고민이 두 번째 사업의 시작이 되기도 해요. 광고는 어디에·누구에게·어떻게를 차례로 고르고, 효과는 숫자보다 손님 말로 먼저 들립니다.</p>
+</figcaption>
+</figure>
+
+<!-- 5. 라이벌 도렌 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="길 건너편에 라이벌 도렌의 체인점이 문을 열고, 도렌이 내 가게 가격표를 보러 와 신경전을 벌이는 장면">
+  <rect width="1600" height="900" fill="url(#dusk)"/>
+  <!-- 건너편 체인점 -->
+  <ellipse cx="1110" cy="520" rx="520" ry="120" fill="url(#coolglow)"/>
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <rect x="680" y="170" width="880" height="350" fill="#d6d9e4"/>
+    <rect x="680" y="170" width="880" height="80" fill="#2a5aa8"/>
+    <rect x="720" y="280" width="800" height="240" fill="#e9f7ff"/>
+    <path d="M920 280 V520 M1120 280 V520 M1320 280 V520" stroke-width="4"/>
+  </g>
+  <g fill="#9fb4cc"><rect x="740" y="400" width="160" height="16"/><rect x="940" y="400" width="160" height="16"/><rect x="1140" y="400" width="160" height="16"/><rect x="1340" y="400" width="160" height="16"/><rect x="740" y="460" width="160" height="16"/><rect x="1340" y="460" width="160" height="16"/></g>
+  <text x="1120" y="228" text-anchor="middle" font-size="48" fill="#fff">도렌마트</text>
+  <g stroke="#1e1a2c" stroke-width="4"><rect x="960" y="300" width="320" height="76" fill="#ffe14d" transform="rotate(-3 1120 338)"/></g>
+  <text x="1120" y="352" text-anchor="middle" font-size="38" fill="#c22f2f" transform="rotate(-3 1120 338)">오픈 기념 7결</text>
+  <!-- 길 -->
+  <rect x="0" y="520" width="1600" height="150" fill="#3e3a55"/>
+  <g fill="#e9e1d4"><rect x="800" y="534" width="30" height="122"/><rect x="860" y="534" width="30" height="122"/><rect x="920" y="534" width="30" height="122"/><rect x="980" y="534" width="30" height="122"/><rect x="1040" y="534" width="30" height="122"/></g>
+  <rect x="0" y="670" width="1600" height="230" fill="#6a6280"/>
+  <!-- 내 가게(앞쪽 왼편) -->
+  <ellipse cx="300" cy="820" rx="380" ry="110" fill="url(#glow)"/>
+  <g stroke="#1e1a2c" stroke-width="6" stroke-linejoin="round">
+    <rect x="-20" y="80" width="560" height="140" fill="#7a5640"/>
+    <rect x="-20" y="210" width="580" height="34" fill="#2c2b47"/>
+    <rect x="10" y="244" width="510" height="560" fill="url(#shopin)"/>
+    <rect x="80" y="244" width="70" height="120" fill="#2f3d78"/><rect x="154" y="244" width="70" height="120" fill="#2f3d78"/><rect x="228" y="244" width="70" height="120" fill="#2f3d78"/><rect x="302" y="244" width="70" height="120" fill="#2f3d78"/>
+  </g>
+  <g font-size="40" fill="#f4ead8" text-anchor="middle"><text x="115" y="318">골</text><text x="189" y="318">목</text><text x="263" y="318">상</text><text x="337" y="318">회</text></g>
+  <use href="#lantern" x="440" y="250" width="50" height="75"/><circle cx="465" cy="290" r="70" fill="url(#glow)"/>
+  <!-- 나 -->
+  <use href="#person" x="190" y="430" width="130" height="358" style="--hair:#2b2230;--top:#f0ead8;--bottom:#2f3d78"/>
+  <rect x="210" y="580" width="90" height="120" rx="12" fill="#2f3d78" stroke="#1e1a2c" stroke-width="4"/>
+  <!-- 가격판 -->
+  <g stroke="#1e1a2c" stroke-width="5" stroke-linejoin="round">
+    <path d="M600 860 L640 660 H780 L820 860" fill="none" stroke-width="7"/>
+    <rect x="620" y="660" width="180" height="150" rx="8" fill="#2d3a33"/>
+  </g>
+  <g font-size="28" fill="#f4ead8"><text x="640" y="708">우유 8결</text><text x="640" y="748">빵 &#160;&#160;6결</text><text x="640" y="788">차 &#160;&#160;9결</text></g>
+  <!-- 도렌 -->
+  <ellipse cx="960" cy="880" rx="90" ry="14" fill="#1e1a2c" opacity=".3"/>
+  <use href="#person" x="880" y="520" width="140" height="385" style="--hair:#16141f;--top:#2a2e48;--bottom:#1f2236"/>
+  <g stroke="#1e1a2c" stroke-width="4"><path d="M935 646 L950 700 L965 646 Z" fill="#c22f2f"/><path d="M932 636 L950 650 L968 636" fill="#f4f1ea"/></g>
+  <g fill="none" stroke="#1e1a2c" stroke-width="4"><circle cx="932" cy="613" r="14"/><circle cx="968" cy="613" r="14"/><path d="M946 613 H954"/></g>
+  <!-- 말풍선 -->
+  <g font-size="32" fill="#1e1a2c">
+    <rect x="1010" y="530" width="420" height="72" rx="26" fill="#eef4ff" stroke="#1e1a2c" stroke-width="4"/>
+    <path d="M1040 600 l-36 30 l60 -30" fill="#eef4ff" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M1042 598 h20" stroke="#eef4ff" stroke-width="6"/>
+    <text x="1220" y="577" text-anchor="middle">여덟 결. 줄은 네 명이군요.</text>
+    <rect x="300" y="380" width="290" height="70" rx="26" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4"/>
+    <path d="M330 448 l-20 26 l44 -26" fill="#fffaf0" stroke="#1e1a2c" stroke-width="4" stroke-linejoin="round"/><path d="M332 446 h20" stroke="#fffaf0" stroke-width="6"/>
+    <text x="445" y="426" text-anchor="middle">…또 오셨네.</text>
+  </g>
+  <!-- 선택지 UI -->
+  <g font-size="28">
+    <rect x="1110" y="700" width="460" height="170" rx="26" fill="#1e1a2c" opacity=".88"/>
+    <text x="1140" y="740" fill="#ffd27a" font-size="22">❚❚ 시간 멈춤</text>
+    <rect x="1135" y="752" width="200" height="96" rx="20" fill="#fffaf0"/><text x="1235" y="794" text-anchor="middle" fill="#1e1a2c">구경</text><text x="1235" y="830" text-anchor="middle" fill="#1e1a2c">오셨어요?</text>
+    <rect x="1350" y="752" width="200" height="96" rx="20" fill="#e8673a"/><text x="1450" y="794" text-anchor="middle" fill="#fff">차 한 잔</text><text x="1450" y="830" text-anchor="middle" fill="#fff">하실래요?</text>
+  </g>
+</svg>
+<figcaption>
+  <h2>라이벌 도렌의 체인점 <span>장면 5</span></h2>
+  <p>길 건너편에 차가운 불빛의 체인점이 열렸습니다. 도렌은 직접 내 가게 가격표와 줄을 보고 갑니다. 시간이 멈춘 동안 받아칠지, 차 한 잔을 권할지 고르세요. 다음 날 창밖으로 그쪽 가격표가 바뀌는 게 보입니다.</p>
+</figcaption>
+</figure>
+
+<!-- 6. 확장의 지평 -->
+<figure>
+<svg viewBox="0 0 1600 900" role="img" aria-label="동네, 도시, 세계로 넓어지는 세 칸 지도와 다른 산업으로 가는 작은 문 아이콘들">
+  <rect width="1600" height="900" fill="#20223f"/>
+  <g font-size="34" fill="#f4ead8" text-anchor="middle"><text x="285" y="78">동네 · 등불골목</text><text x="800" y="78">도시 · 카사네 시</text><text x="1315" y="78">세계 · 세 바다</text></g>
+  <!-- 동네 -->
+  <g stroke="#1e1a2c" stroke-width="4">
+    <rect x="50" y="100" width="470" height="520" rx="22" fill="#e8dcc6"/>
+    <g fill="#c9b79a">
+      <rect x="80" y="130" width="120" height="120" rx="8"/><rect x="225" y="130" width="120" height="120" rx="8"/><rect x="370" y="130" width="120" height="120" rx="8"/>
+      <rect x="80" y="290" width="120" height="140" rx="8"/><rect x="370" y="290" width="120" height="140" rx="8"/>
+      <rect x="80" y="470" width="120" height="120" rx="8"/><rect x="225" y="470" width="120" height="120" rx="8"/><rect x="370" y="470" width="120" height="120" rx="8"/>
+    </g>
+    <rect x="225" y="290" width="120" height="140" rx="8" fill="#9cc29a"/>
+  </g>
+  <g><circle cx="200" cy="270" r="40" fill="url(#glow)"/><circle cx="200" cy="270" r="15" fill="#e8673a" stroke="#1e1a2c" stroke-width="4"/>
+    <circle cx="360" cy="450" r="14" fill="#5b8fd8" stroke="#1e1a2c" stroke-width="4"/>
+    <circle cx="140" cy="190" r="11" fill="#5a8f6e" stroke="#1e1a2c" stroke-width="3"/><circle cx="430" cy="190" r="11" fill="#c98a52" stroke="#1e1a2c" stroke-width="3"/></g>
+  <g font-size="22" fill="#231f2e"><text x="96" y="318">내 가게</text><text x="385" y="500" font-size="20">도렌</text></g>
+  <!-- 도시 -->
+  <g stroke="#1e1a2c" stroke-width="4">
+    <rect x="565" y="100" width="470" height="520" rx="22" fill="#d9d2c4"/>
+    <path d="M565 380 Q700 330 800 400 T1035 360 V440 Q920 470 800 470 T565 460 Z" fill="#7aa6c8"/>
+    <path d="M600 130 H760 V330 H600 Z M780 130 H1000 V300 H780 Z M600 500 H820 V590 H600 Z M840 490 H1000 V590 H840 Z" fill="#c4b49a"/>
+  </g>
+  <path d="M640 200 Q780 260 900 210 Q960 520 690 540" stroke="#e8673a" stroke-width="5" stroke-dasharray="14 10" fill="none"/>
+  <g stroke="#1e1a2c" stroke-width="4" fill="#e8673a"><circle cx="640" cy="200" r="14"/><circle cx="900" cy="210" r="14"/><circle cx="690" cy="540" r="14"/></g>
+  <circle cx="940" cy="540" r="14" fill="#5b8fd8" stroke="#1e1a2c" stroke-width="4"/><circle cx="960" cy="170" r="14" fill="#5b8fd8" stroke="#1e1a2c" stroke-width="4"/>
+  <g stroke="#1e1a2c" stroke-width="3"><rect x="860" y="520" width="50" height="34" fill="#f2f0ea"/><rect x="842" y="530" width="20" height="24" fill="#f2f0ea"/></g>
+  <g font-size="20" fill="#231f2e"><text x="610" y="240">지점</text><text x="862" y="600">물류</text><text x="870" y="160">라이벌</text></g>
+  <!-- 세계 -->
+  <g stroke="#1e1a2c" stroke-width="4">
+    <rect x="1080" y="100" width="470" height="520" rx="22" fill="#2f4f7a"/>
+    <path d="M1120 170 Q1200 130 1260 180 Q1290 260 1220 290 Q1140 300 1120 250 Z" fill="#c4b49a"/>
+    <path d="M1340 160 Q1460 140 1510 210 Q1520 330 1430 340 Q1360 300 1340 230 Z" fill="#c4b49a"/>
+    <path d="M1180 420 Q1290 380 1380 440 Q1420 560 1280 580 Q1170 560 1180 420 Z" fill="#c4b49a"/>
+  </g>
+  <path d="M1220 240 Q1300 300 1420 260 M1220 240 Q1220 380 1280 480 M1420 260 Q1420 380 1290 480" stroke="#ffd27a" stroke-width="4" stroke-dasharray="10 10" fill="none"/>
+  <g stroke="#1e1a2c" stroke-width="4" fill="#e8673a"><circle cx="1220" cy="240" r="14"/><circle cx="1420" cy="260" r="14"/><circle cx="1290" cy="480" r="14"/></g>
+  <g font-size="20" fill="#f4ead8"><text x="1098" y="335">고객사 발표</text><text x="1430" y="365">공장 입찰</text><text x="1300" y="525">원자재</text></g>
+  <!-- 화살표 -->
+  <g fill="#ffd27a"><path d="M526 360 l30 0 l0 -14 l24 22 l-24 22 l0 -14 l-30 0 z"/><path d="M1041 360 l30 0 l0 -14 l24 22 l-24 22 l0 -14 l-30 0 z"/></g>
+  <!-- 작은 문 -->
+  <text x="800" y="680" text-anchor="middle" font-size="28" fill="#c9c1d6">모든 산업에 작은 문 — 기회는 사람과 소식으로 옵니다</text>
+  <g id="doors">
+  <g transform="translate(70 0)"><rect x="0" y="710" width="100" height="160" rx="10" fill="#8a5a3c" stroke="#1e1a2c" stroke-width="4"/><circle cx="82" cy="795" r="7" fill="#ffd27a"/>
+    <rect x="22" y="735" width="56" height="36" rx="4" fill="#bfe3c8" stroke="#1e1a2c" stroke-width="3"/><rect x="12" y="771" width="76" height="10" rx="3" fill="#d9d2c4" stroke="#1e1a2c" stroke-width="3"/>
+    <text x="120" y="780" font-size="28" fill="#f4ead8">AI 외주</text><text x="120" y="816" font-size="21" fill="#c9c1d6">2인 사무실</text></g>
+  <g transform="translate(450 0)"><rect x="0" y="710" width="100" height="160" rx="10" fill="#4e5e86" stroke="#1e1a2c" stroke-width="4"/><circle cx="82" cy="795" r="7" fill="#ffd27a"/>
+    <path d="M25 745 h-8 M25 758 h-8 M25 771 h-8 M75 745 h8 M75 758 h8 M75 771 h8 M38 732 v-8 M62 732 v-8 M38 782 v8 M62 782 v8" stroke="#ffd27a" stroke-width="3"/>
+    <rect x="25" y="732" width="50" height="50" rx="4" fill="#2a2d40" stroke="#1e1a2c" stroke-width="3"/>
+    <text x="120" y="780" font-size="28" fill="#f4ead8">반도체 부품</text><text x="120" y="816" font-size="21" fill="#c9c1d6">소분 창고</text></g>
+  <g transform="translate(830 0)"><rect x="0" y="710" width="100" height="160" rx="10" fill="#e9eef4" stroke="#1e1a2c" stroke-width="4"/><circle cx="82" cy="795" r="7" fill="#5b8fd8"/>
+    <rect x="25" y="745" width="50" height="22" rx="11" fill="#f2f0ea"/><path d="M50 745 v22" stroke="#e8673a" stroke-width="22"/><rect x="25" y="745" width="50" height="22" rx="11" fill="none" stroke="#1e1a2c" stroke-width="3"/>
+    <text x="120" y="780" font-size="28" fill="#f4ead8">제약 공급</text><text x="120" y="816" font-size="21" fill="#c9c1d6">약국 납품 계약</text></g>
+  <g transform="translate(1210 0)"><rect x="0" y="710" width="100" height="160" rx="10" fill="#6c5a48" stroke="#1e1a2c" stroke-width="4"/><circle cx="82" cy="795" r="7" fill="#ffd27a"/>
+    <rect x="20" y="740" width="60" height="44" fill="#d4a46a" stroke="#1e1a2c" stroke-width="3"/><path d="M50 740 V784" stroke="#8a5a3c" stroke-width="3"/>
+    <text x="120" y="780" font-size="28" fill="#f4ead8">도매·물류</text><text x="120" y="816" font-size="21" fill="#c9c1d6">공급처 갖기</text></g>
+  </g>
+</svg>
+<figcaption>
+  <h2>확장의 지평 <span>장면 6</span></h2>
+  <p>무대는 동네에서 도시, 세계로 넓어집니다. 가게를 늘릴 수도, 공급처를 가질 수도, 전혀 다른 산업의 작은 문을 열 수도 있어요. 돈으로 해금하지 않고, 단골·거래처·뉴스가 건네는 기회로 들어갑니다.</p>
+</figcaption>
+</figure>
+
+<footer>콘셉트 일러스트(직접 그린 SVG) · 실제 게임 화면이 아닙니다 · 지명·상호는 모두 가상</footer>
+</div>
